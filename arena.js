@@ -287,6 +287,39 @@ let modelsCache = { at: 0, models: null, sitekey: null };
 const VIDEO_ARENAS = ['text-to-video', 'image-to-video', 'video-to-video'];
 const IMAGE_ARENAS = ['text-to-image', 'image-edit', 'multi-image-edit'];
 
+// Extract the homepage's embedded initialModels array from the RSC
+// payload. The payload stores JSON as an escaped string, so scan with a
+// bracket matcher that understands \" string delimiters instead of a
+// regex that depends on which key happens to follow the array (that
+// dependency is exactly what kept breaking the old scrape).
+function extractInitialModels(html) {
+    const key = '\\"initialModels\\":';
+    const start = html.indexOf(key);
+    if (start < 0) return null;
+    let i = start + key.length;
+    if (html[i] !== '[') return null;
+    let depth = 0, inStr = false;
+    for (let j = i; j < html.length; j++) {
+        const c = html[j];
+        if (c === '\\') {
+            if (html[j + 1] === '"') inStr = !inStr;
+            j++; // skip the escaped character
+            continue;
+        }
+        if (inStr) continue;
+        if (c === '[') depth++;
+        else if (c === ']') {
+            depth--;
+            if (depth === 0) {
+                const raw = html.slice(i, j + 1);
+                try { const arr = JSON.parse(JSON.parse('"' + raw + '"')); return Array.isArray(arr) ? arr : null; }
+                catch (e) { return null; }
+            }
+        }
+    }
+    return null;
+}
+
 async function scrapeSiteData(p) {
     if (modelsCache.models && Date.now() - modelsCache.at < 5 * 60 * 1000) return modelsCache;
     const html = await p.content();
@@ -299,14 +332,18 @@ async function scrapeSiteData(p) {
     // …) and is the ONLY place that lists every model — the homepage's
     // embedded initialModels only carries the current arena's subset,
     // which is why video/image models went missing with scraping alone.
+    // Cloudflare sometimes 403-challenges this fetch while the page
+    // itself loads fine, so retry before falling back.
     let models = null;
-    try {
-        const catalog = await p.evaluate(async () => {
-            const res = await fetch('/nextjs-api/model-catalog');
-            if (!res.ok) return null;
-            return await res.json().catch(() => null);
-        });
-        if (Array.isArray(catalog)) {
+    for (let attempt = 0; attempt < 3 && !models; attempt++) {
+        if (attempt > 0) await p.waitForTimeout(2500);
+        try {
+            const catalog = await p.evaluate(async () => {
+                const res = await fetch('/nextjs-api/model-catalog');
+                if (!res.ok) return null;
+                return await res.json().catch(() => null);
+            });
+            if (Array.isArray(catalog)) {
             const byId = new Map();
             for (const section of catalog) {
                 if (!section || !Array.isArray(section.models)) continue;
@@ -321,16 +358,14 @@ async function scrapeSiteData(p) {
                 }
             }
             if (byId.size) models = [...byId.values()];
-        }
-    } catch (e) { /* fall back to the page scrape below */ }
+            }
+        } catch (e) { /* fall back to the page scrape below */ }
+    }
 
     // Fallback: the homepage's embedded initialModels (subset).
     if (!models) {
-        const m = html.match(/\\"initialModels\\":(\[.*?\]),\\"initialModel[A-Z]Id/s);
-        if (m) {
-            try { models = JSON.parse(JSON.parse('"' + m[1].replace(/"/g, '\\"') + '"')); } catch (e) { /* ignore */ }
-        }
-        if (Array.isArray(models)) models = models.map(mo => ({ ...mo, _arenas: [] }));
+        const arr = extractInitialModels(html);
+        if (arr) models = arr.map(mo => ({ ...mo, _arenas: [] }));
     }
 
     if (Array.isArray(models)) {

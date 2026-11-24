@@ -255,6 +255,39 @@ async function withPage(fn) {
 
 // ------------------------------------------------------------ site data
 let lastScrapeDebug = '';
+// Extract the homepage's embedded initialModels array from the RSC
+// payload. The payload stores JSON as an escaped string, so scan with a
+// bracket matcher that understands \" string delimiters instead of a
+// regex that depends on which key happens to follow the array (that
+// dependency is exactly what kept breaking the old scrape).
+function extractInitialModels(html) {
+    const key = '\\"initialModels\\":';
+    const start = html.indexOf(key);
+    if (start < 0) return null;
+    let i = start + key.length;
+    if (html[i] !== '[') return null;
+    let depth = 0, inStr = false;
+    for (let j = i; j < html.length; j++) {
+        const c = html[j];
+        if (c === '\\') {
+            if (html[j + 1] === '"') inStr = !inStr;
+            j++; // skip the escaped character
+            continue;
+        }
+        if (inStr) continue;
+        if (c === '[') depth++;
+        else if (c === ']') {
+            depth--;
+            if (depth === 0) {
+                const raw = html.slice(i, j + 1);
+                try { const arr = JSON.parse(JSON.parse('"' + raw + '"')); return Array.isArray(arr) ? arr : null; }
+                catch (e) { return null; }
+            }
+        }
+    }
+    return null;
+}
+
 async function scrapeSiteData(p) {
     const html = await p.content();
     let sitekey = null;
@@ -262,20 +295,25 @@ async function scrapeSiteData(p) {
     if (sk) sitekey = sk[1];
     let models = null;
     let catalogDebug = 'not-tried';
-    try {
-        const out = await p.evaluate(async () => {
-            try {
-                const res = await fetch('/nextjs-api/model-catalog');
-                const text = await res.text();
-                let json = null;
-                try { json = JSON.parse(text); } catch (e) { /* not json */ }
-                return { status: res.status, isArray: Array.isArray(json), snippet: text.slice(0, 120), json };
-            } catch (e) { return { error: String(e && e.message || e) }; }
-        });
-        if (out && out.error) catalogDebug = 'fetch threw: ' + out.error;
-        else if (out) catalogDebug = `HTTP ${out.status}, array=${out.isArray}, body starts: ${out.snippet}`;
-        const catalog = out && out.json;
-        if (Array.isArray(catalog)) {
+    // Cloudflare sometimes answers this fetch with a 403 challenge page
+    // while the main page loads fine (its mood varies per request and
+    // per rotating-proxy IP) — retry a few times before falling back.
+    for (let attempt = 0; attempt < 3 && !models; attempt++) {
+        if (attempt > 0) await p.waitForTimeout(2500);
+        try {
+            const out = await p.evaluate(async () => {
+                try {
+                    const res = await fetch('/nextjs-api/model-catalog');
+                    const text = await res.text();
+                    let json = null;
+                    try { json = JSON.parse(text); } catch (e) { /* not json */ }
+                    return { status: res.status, isArray: Array.isArray(json), snippet: text.slice(0, 120), json };
+                } catch (e) { return { error: String(e && e.message || e) }; }
+            });
+            if (out && out.error) catalogDebug = 'fetch threw: ' + out.error;
+            else if (out) catalogDebug = `HTTP ${out.status}, array=${out.isArray}, body starts: ${out.snippet}`;
+            const catalog = out && out.json;
+            if (Array.isArray(catalog)) {
             const byId = new Map();
             for (const section of catalog) {
                 if (!section || !Array.isArray(section.models)) continue;
@@ -290,14 +328,12 @@ async function scrapeSiteData(p) {
                 }
             }
             if (byId.size) models = [...byId.values()];
-        }
-    } catch (e) { /* fall back below */ }
+            }
+        } catch (e) { catalogDebug = 'evaluate threw: ' + String(e && e.message || e).split('\n')[0]; }
+    }
     if (!models) {
-        const m = html.match(/\\"initialModels\\":(\[.*?\]),\\"initialModel[A-Z]Id/s);
-        if (m) {
-            try { models = JSON.parse(JSON.parse('"' + m[1].replace(/"/g, '\\"') + '"')); } catch (e) { /* ignore */ }
-        }
-        if (Array.isArray(models)) models = models.map(mo => ({ ...mo, _arenas: [] }));
+        const arr = extractInitialModels(html);
+        if (arr) models = arr.map(mo => ({ ...mo, _arenas: [] }));
     }
     lastScrapeDebug = `catalog: ${catalogDebug}; htmlLen=${html.length}, hasInitialModels=${html.includes('initialModels')}`;
     return { models, sitekey: sitekey || DEFAULT_SITEKEY };
