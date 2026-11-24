@@ -93,6 +93,17 @@ async function clickLoginEntry(p) {
     return false;
 }
 
+// Click an element three ways, hardest last: a normal Playwright click
+// (real mouse, waits for actionability), a forced click (skips the
+// actionability checks), and a raw DOM click (fires even when an overlay
+// intercepts the pointer — Arena's page has layers that eat real clicks
+// in a headless browser while the element sits right there).
+async function tryClick(el) {
+    try { await el.click({ timeout: 2500 }); return true; } catch (e) { /* next style */ }
+    try { await el.click({ force: true, timeout: 2500 }); return true; } catch (e) { /* next style */ }
+    try { await el.evaluate(e => e.click()); return true; } catch (e) { return false; }
+}
+
 // ------------------------------------------------------------ auto-login
 // With ARENA_EMAIL + ARENA_PASSWORD set, the function logs ITSELF in
 // through Arena's dialog (email → Continue with email → password → Log In)
@@ -131,7 +142,7 @@ async function autoLogin(p) {
             const el = loc.first();
             try {
                 await el.waitFor({ state: 'visible', timeout: 3000 });
-                await el.click({ timeout: 5000 });
+                if (!(await tryClick(el))) throw new Error('all click styles failed');
                 await Promise.race([
                     emailInput.waitFor({ state: 'visible', timeout: 12000 }),
                     dialogHeading.waitFor({ state: 'visible', timeout: 12000 }),
