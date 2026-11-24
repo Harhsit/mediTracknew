@@ -191,6 +191,18 @@ async function autoLogin(p) {
     }
 }
 
+// Poll until Cloudflare's "Just a moment..." interstitial clears (it
+// often needs far longer than a few seconds through a rotating proxy).
+async function waitOutCloudflare(page, maxMs = 45000) {
+    const start = Date.now();
+    for (;;) {
+        const title = await page.title().catch(() => '');
+        if (!/just a moment/i.test(title)) return true;
+        if (Date.now() - start > maxMs) return false;
+        await page.waitForTimeout(2000);
+    }
+}
+
 async function withPage(fn) {
     const session = loadSession();
     if (!session && !autoLoginCreds()) {
@@ -236,13 +248,7 @@ async function withPage(fn) {
         } catch (err) {
             throw new ArenaError('ARENA_UNREACHABLE', `The serverless browser could not open arena.ai (${err.message.split('\n')[0]}). If ARENA_PROXY is set, check the proxy works.`);
         }
-        for (let i = 0; i < 8; i++) {
-            const title = await page.title().catch(() => '');
-            if (!/just a moment/i.test(title)) break;
-            await page.waitForTimeout(2000);
-        }
-        const title = await page.title().catch(() => '');
-        if (/just a moment/i.test(title)) {
+        if (!(await waitOutCloudflare(page))) {
             throw new ArenaError('CLOUDFLARE_BLOCKED', 'Cloudflare is challenging the serverless browser. A residential ARENA_PROXY usually fixes this; without one, Vercel datacenter IPs are often blocked.');
         }
         // No live session? Log in with ARENA_EMAIL/ARENA_PASSWORD if set.
@@ -257,10 +263,8 @@ async function withPage(fn) {
             // valid, unexpired access token.
             if (await getAuthSession(page).catch(() => null)) {
                 await page.goto(ORIGIN + '/', { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
-                for (let i = 0; i < 8; i++) {
-                    const t = await page.title().catch(() => '');
-                    if (!/just a moment/i.test(t)) break;
-                    await page.waitForTimeout(2000);
+                if (!(await waitOutCloudflare(page))) {
+                    throw new ArenaError('CLOUDFLARE_BLOCKED', 'Cloudflare challenged the post-login reload. A residential ARENA_PROXY usually fixes this.');
                 }
             }
         }
@@ -531,7 +535,7 @@ async function listModels() {
     });
 }
 
-async function chat({ message, model, conversationId, images, generateImage, generateVideo }) {
+async function chatOnce({ message, model, conversationId, images, generateImage, generateVideo }) {
     if (generateVideo) {
         throw new ArenaError('VIDEO_ON_VERCEL', 'Video creation takes ~10 minutes on Arena — longer than Vercel lets any request run (300 s max). Use the server edition (Render/VPS) for video; text, vision and image creation work here.');
     }
@@ -620,6 +624,23 @@ async function chat({ message, model, conversationId, images, generateImage, gen
             conversation_id: convId,
         };
     });
+}
+
+
+// One full retry on transient failures: every attempt is a fresh browser
+// on a fresh proxy egress IP, and most failures seen live (Cloudflare
+// mood, catalog 403, recaptcha script load) are per-IP luck.
+const TRANSIENT_CODES = ['CLOUDFLARE_BLOCKED', 'MODELS_UNAVAILABLE', 'RECAPTCHA_FAILED', 'ARENA_UNREACHABLE'];
+async function chat(args) {
+    let lastErr = null;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+        try { return await chatOnce(args); }
+        catch (err) {
+            lastErr = err;
+            if (!TRANSIENT_CODES.includes(err.code) || attempt === 2) throw err;
+        }
+    }
+    throw lastErr;
 }
 
 module.exports = { chat, listModels, ArenaError };
