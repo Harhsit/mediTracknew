@@ -658,17 +658,28 @@ async function chatOnce({ message, model, conversationId, images, generateImage,
             // credential). The Nov 2026 API also expects the web
             // deployment id headers the real frontend sends.
             if (dplId) { headers['x-deployment-id'] = dplId; headers['x-arena-web-deployment'] = dplId; }
-            const res = await fetch(url, {
-                method: 'POST',
-                headers,
-                credentials: 'include',
-                body: JSON.stringify(payload),
-            });
+            let res;
+            try {
+                res = await fetch(url, {
+                    method: 'POST',
+                    headers,
+                    credentials: 'include',
+                    body: JSON.stringify(payload),
+                });
+            } catch (e) {
+                // Network-level failure (proxy connection dropped, DNS,
+                // reset) — surface as status 0 so the caller can retry
+                // the whole attempt on a fresh browser/IP.
+                return { status: 0, text: 'FETCH_ERROR: ' + String(e && e.message || e), tokenSource, tokenExp: null, cookieNames: [] };
+            }
             let exp = null;
             if (token) { try { exp = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).exp || null; } catch (e) { /* not a JWT */ } }
             const cookieNames = document.cookie.split(';').map(s => s.trim().split('=')[0]).filter(Boolean);
             return { status: res.status, text: await res.text(), tokenSource, tokenExp: exp, cookieNames };
         }, { url, payload, accessToken, dplId });
+        if (result.status === 0) {
+            throw new ArenaError('UPSTREAM_FETCH_FAILED', 'The in-page request to Arena failed at the network level (usually a dropped proxy connection). ' + String(result.text || '').slice(0, 160));
+        }
         if (result.status === 401 || result.status === 403) {
             throw new ArenaError('UPSTREAM_' + result.status, `Arena rejected the request (HTTP ${result.status}) — session expired or reCAPTCHA refused (serverless browsers score low; a residential ARENA_PROXY helps). Details: ${result.text.slice(0, 200)} [token: source=${result.tokenSource || '?'}, exp=${result.tokenExp ? new Date(result.tokenExp * 1000).toISOString() : 'unknown'}, cookies=${(result.cookieNames || []).join(',')}, dpl=${dplId ? 'yes' : 'no'}, sess=${session.user ? (session.user.is_anonymous ? 'anonymous' : 'real') : 'no-user'}]`);
         }
@@ -696,7 +707,7 @@ async function chatOnce({ message, model, conversationId, images, generateImage,
 // One full retry on transient failures: every attempt is a fresh browser
 // on a fresh proxy egress IP, and most failures seen live (Cloudflare
 // mood, catalog 403, recaptcha script load) are per-IP luck.
-const TRANSIENT_CODES = ['CLOUDFLARE_BLOCKED', 'MODELS_UNAVAILABLE', 'RECAPTCHA_FAILED', 'ARENA_UNREACHABLE'];
+const TRANSIENT_CODES = ['CLOUDFLARE_BLOCKED', 'MODELS_UNAVAILABLE', 'RECAPTCHA_FAILED', 'ARENA_UNREACHABLE', 'UPSTREAM_FETCH_FAILED'];
 async function chat(args) {
     let lastErr = null;
     for (let attempt = 1; attempt <= 2; attempt++) {

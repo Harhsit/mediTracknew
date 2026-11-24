@@ -685,16 +685,24 @@ async function chatOnce({ message, model, conversationId, images, generateImage,
         // Authorization header). The Nov 2026 API also expects the web
         // deployment id headers the real frontend sends.
         if (dplId) { headers['x-deployment-id'] = dplId; headers['x-arena-web-deployment'] = dplId; }
-        const res = await fetch(url, {
-            method: 'POST',
-            headers,
-            credentials: 'include',
-            body: JSON.stringify(payload),
-        });
+        let res;
+        try {
+            res = await fetch(url, {
+                method: 'POST',
+                headers,
+                credentials: 'include',
+                body: JSON.stringify(payload),
+            });
+        } catch (e) {
+            return { status: 0, text: 'FETCH_ERROR: ' + String(e && e.message || e), tokenSource, tokenExp: null };
+        }
         let exp = null;
         if (token) { try { exp = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).exp || null; } catch (e) { /* not a JWT */ } }
         return { status: res.status, text: await res.text(), tokenSource, tokenExp: exp };
     }, { url, payload, accessToken, dplId });
+    if (result.status === 0) {
+        throw new ArenaError('UPSTREAM_FETCH_FAILED', 'The in-page request to Arena failed at the network level (usually a dropped proxy connection). ' + String(result.text || '').slice(0, 160));
+    }
     if (result.status === 401 || result.status === 403) {
         throw new ArenaError('UPSTREAM_' + result.status, `Arena rejected the request (HTTP ${result.status}) — session expired or reCAPTCHA refused. Details: ${result.text.slice(0, 200)} [token: source=${result.tokenSource || '?'}, exp=${result.tokenExp ? new Date(result.tokenExp * 1000).toISOString() : 'unknown'}, dpl=${dplId ? 'yes' : 'no'}]`);
     }
@@ -722,7 +730,7 @@ function chat(args) {
         try { return await chatOnce(args); }
         catch (err) {
             // One retry with a fresh token/page state for transient failures.
-            if (err instanceof ArenaError && ['EMPTY_STREAM', 'RECAPTCHA_FAILED', 'UPSTREAM_403'].includes(err.code)) {
+            if (err instanceof ArenaError && ['EMPTY_STREAM', 'RECAPTCHA_FAILED', 'UPSTREAM_403', 'UPSTREAM_FETCH_FAILED'].includes(err.code)) {
                 const p = await getPage();
                 await p.reload({ waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
                 return await chatOnce(args);
