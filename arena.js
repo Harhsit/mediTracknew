@@ -282,7 +282,7 @@ async function autoLogin(p) {
         const dialog = p.locator('div[role="dialog"]').last();
         const scope = (await dialog.count().catch(() => 0)) > 0 ? dialog : p;
         await emailInput.fill(creds.email);
-        await scope.getByRole('button', { name: /continue with email/i }).click();
+        if (!(await tryClick(scope.getByRole('button', { name: /continue with email/i }).first()))) throw new ArenaError('AUTO_LOGIN_FAILED', 'The "Continue with email" button could not be clicked.');
         const passInput = p.locator('input[type="password"]').first();
         try {
             await passInput.waitFor({ state: 'visible', timeout: 20000 });
@@ -294,7 +294,7 @@ async function autoLogin(p) {
             throw new ArenaError('AUTO_LOGIN_FAILED', 'The password field never appeared after the email step. Arena may have changed its login dialog.');
         }
         await passInput.fill(creds.password);
-        await scope.getByRole('button', { name: /^log in$/i }).click();
+        if (!(await tryClick(scope.getByRole('button', { name: /^log in$/i }).first()))) throw new ArenaError('AUTO_LOGIN_FAILED', 'The final "Log In" button could not be clicked.');
         // Success = the Supabase auth cookie shows up (checked by caller too).
         for (let i = 0; i < 30; i++) {
             if (await getRealSession(p)) return true;
