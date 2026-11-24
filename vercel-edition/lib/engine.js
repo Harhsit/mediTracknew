@@ -38,7 +38,7 @@ function uuidv7() {
 
 function loadSession() {
     const b64 = String(process.env.ARENA_SESSION_B64 || '').trim();
-    if (!b64) throw new ArenaError('NO_SESSION', 'ARENA_SESSION_B64 is not set on this deployment. Create it with `npm run session-for-vercel` in the main arena-wrapper project (after `npm run login`) and paste it into the Vercel project env vars.');
+    if (!b64) return null; // no stored session — auto-login (ARENA_EMAIL/ARENA_PASSWORD) may still work
     try {
         const state = JSON.parse(Buffer.from(b64, 'base64').toString('utf8'));
         if (!state || !Array.isArray(state.cookies)) throw new Error('bad shape');
@@ -60,22 +60,89 @@ function proxyOption() {
     } catch (e) { return undefined; }
 }
 
+// ------------------------------------------------------------ auto-login
+// With ARENA_EMAIL + ARENA_PASSWORD set, the function logs ITSELF in
+// through Arena's dialog (email → Continue with email → password → Log In)
+// — no ARENA_SESSION_B64 needed. The password comes only from the
+// environment and is never logged.
+let lastAutoLoginError = null;
+function autoLoginCreds() {
+    const email = String(process.env.ARENA_EMAIL || '').trim();
+    const password = String(process.env.ARENA_PASSWORD || '');
+    return email && password ? { email, password } : null;
+}
+async function autoLogin(p) {
+    const creds = autoLoginCreds();
+    if (!creds) return false;
+    lastAutoLoginError = null;
+    try {
+        const loginBtn = p.getByRole('button', { name: /^log in$/i }).first();
+        await loginBtn.waitFor({ state: 'visible', timeout: 15000 });
+        await loginBtn.click();
+        const dialog = p.locator('div[role="dialog"]').last();
+        const emailInput = dialog.locator('input[type="email"], input[name="email"]').first();
+        await emailInput.waitFor({ state: 'visible', timeout: 15000 });
+        await emailInput.fill(creds.email);
+        await dialog.getByRole('button', { name: /continue with email/i }).click();
+        const passInput = dialog.locator('input[type="password"]').first();
+        try {
+            await passInput.waitFor({ state: 'visible', timeout: 20000 });
+        } catch (e) {
+            const text = await dialog.innerText().catch(() => '');
+            if (/verify your email|verification link|create account/i.test(text)) {
+                throw new ArenaError('AUTO_LOGIN_FAILED', 'Arena answered the email step with a create-account / verify-by-email-link screen, not a password field. Auto-login only works for an existing account that has a password; use ARENA_SESSION_B64 for this account instead.');
+            }
+            throw new ArenaError('AUTO_LOGIN_FAILED', 'The password field never appeared after the email step. Arena may have changed its login dialog.');
+        }
+        await passInput.fill(creds.password);
+        await dialog.getByRole('button', { name: /^log in$/i }).click();
+        for (let i = 0; i < 30; i++) {
+            if (await getAuthSession(p)) return true;
+            const text = await dialog.innerText().catch(() => '');
+            if (/invalid|incorrect|wrong password|try again/i.test(text)) {
+                throw new ArenaError('AUTO_LOGIN_FAILED', 'Arena rejected the email/password (ARENA_EMAIL / ARENA_PASSWORD). Check the Vercel env vars.');
+            }
+            await p.waitForTimeout(1000);
+        }
+        throw new ArenaError('AUTO_LOGIN_FAILED', 'Login was submitted but no session appeared (a captcha or an extra verification step may be blocking it).');
+    } catch (err) {
+        lastAutoLoginError = err instanceof ArenaError ? err : new ArenaError('AUTO_LOGIN_FAILED', 'Auto-login failed: ' + err.message.split('\n')[0]);
+        return false;
+    }
+}
+
 async function withPage(fn) {
     const session = loadSession();
+    if (!session && !autoLoginCreds()) {
+        throw new ArenaError('NO_SESSION', 'No Arena login is configured on this deployment. Easiest: set ARENA_EMAIL + ARENA_PASSWORD in the Vercel project env vars and the server logs itself in. Or set ARENA_SESSION_B64 (create it with `npm run session-for-vercel` in the main arena-wrapper project).');
+    }
+    // @sparticuz/chromium extracts its bundled system libraries (libnss3
+    // and friends, from its al2023 pack) and puts them on LD_LIBRARY_PATH
+    // only when it detects an AWS Lambda Node 20/22 runtime. Vercel runs
+    // on Lambda but does not set those markers, so Chromium died with
+    // "libnss3.so: cannot open shared object file". Set the marker before
+    // the package is required below (its setup runs at require time).
+    if (!process.env.AWS_EXECUTION_ENV) process.env.AWS_EXECUTION_ENV = 'AWS_Lambda_nodejs20.x';
     const sparticuz = require('@sparticuz/chromium');
     const { chromium } = require('playwright-core');
-    const executablePath = await sparticuz.executablePath();
-    const browser = await chromium.launch({
-        executablePath,
-        args: [...sparticuz.args, '--no-sandbox', '--disable-dev-shm-usage'],
-        headless: true,
-        proxy: proxyOption(),
-    });
+    let browser;
+    try {
+        const executablePath = await sparticuz.executablePath();
+        browser = await chromium.launch({
+            executablePath,
+            args: [...sparticuz.args, '--no-sandbox', '--disable-dev-shm-usage'],
+            headless: true,
+            proxy: proxyOption(),
+        });
+    } catch (err) {
+        const tail = String(err && err.message || err).split('\n').filter(l => /error|failed|cannot|no such/i.test(l)).slice(-3).join(' | ').slice(0, 400);
+        throw new ArenaError('BROWSER_START', 'The serverless browser could not start. ' + (tail || String(err && err.message || err).slice(0, 300)));
+    }
     try {
         const context = await browser.newContext({ userAgent: UA, viewport: { width: 1366, height: 900 } });
-        if (session.cookies.length) await context.addCookies(session.cookies);
+        if (session && session.cookies.length) await context.addCookies(session.cookies);
         // Restore localStorage too (Supabase keeps parts of the session there).
-        const origins = (session.origins || []).filter(o => o && o.origin === ORIGIN && Array.isArray(o.localStorage) && o.localStorage.length);
+        const origins = ((session && session.origins) || []).filter(o => o && o.origin === ORIGIN && Array.isArray(o.localStorage) && o.localStorage.length);
         if (origins.length) {
             const items = origins[0].localStorage;
             await context.addInitScript((items) => {
@@ -98,6 +165,8 @@ async function withPage(fn) {
         if (/just a moment/i.test(title)) {
             throw new ArenaError('CLOUDFLARE_BLOCKED', 'Cloudflare is challenging the serverless browser. A residential ARENA_PROXY usually fixes this; without one, Vercel datacenter IPs are often blocked.');
         }
+        // No live session? Log in with ARENA_EMAIL/ARENA_PASSWORD if set.
+        if (!(await getAuthSession(page).catch(() => null))) await autoLogin(page);
         return await fn(page);
     } finally {
         await browser.close().catch(() => {});
@@ -305,7 +374,10 @@ async function chat({ message, model, conversationId, images, generateImage, gen
     }
     return withPage(async (p) => {
         const session = await getAuthSession(p);
-        if (!session) throw new ArenaError('LOGIN_REQUIRED', 'The Arena session in ARENA_SESSION_B64 is missing or expired. Re-run `npm run session-for-vercel` in the main project and update the env var.');
+        if (!session) {
+            if (lastAutoLoginError) throw lastAutoLoginError;
+            throw new ArenaError('LOGIN_REQUIRED', 'Not logged in to Arena. Set ARENA_EMAIL + ARENA_PASSWORD so the server logs itself in, or refresh ARENA_SESSION_B64 (re-run `npm run session-for-vercel` in the main project).');
+        }
         const { models, sitekey } = await scrapeSiteData(p);
         if (!models) throw new ArenaError('MODELS_UNAVAILABLE', 'Could not read the model list from arena.ai.');
         const modelObj = resolveModel(models, model);
