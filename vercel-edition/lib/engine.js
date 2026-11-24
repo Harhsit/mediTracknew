@@ -60,6 +60,17 @@ function proxyOption() {
     } catch (e) { return undefined; }
 }
 
+// Short description of what the page is actually showing — attached to
+// failure errors so a blocked/blank/half-loaded page is visible from the
+// API response instead of being a silent mystery.
+async function pageState(p) {
+    try {
+        const title = await p.title().catch(() => '?');
+        const text = await p.evaluate(() => (document.body && document.body.innerText || '').replace(/\s+/g, ' ').slice(0, 350)).catch(() => '');
+        return ` [page: title="${title}" url="${p.url()}" text="${text}"]`;
+    } catch (e) { return ' [page state unavailable]'; }
+}
+
 // ------------------------------------------------------------ auto-login
 // With ARENA_EMAIL + ARENA_PASSWORD set, the function logs ITSELF in
 // through Arena's dialog (email → Continue with email → password → Log In)
@@ -76,12 +87,23 @@ async function autoLogin(p) {
     if (!creds) return false;
     lastAutoLoginError = null;
     try {
+        // The Arena app hydrates slowly through a proxy — give it a moment
+        // to render before looking for the button.
+        await p.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
         const loginBtn = p.getByRole('button', { name: /^log in$/i }).first();
-        await loginBtn.waitFor({ state: 'visible', timeout: 15000 });
+        try {
+            await loginBtn.waitFor({ state: 'visible', timeout: 30000 });
+        } catch (e) {
+            throw new ArenaError('AUTO_LOGIN_FAILED', 'The "Log in" button never appeared on arena.ai.' + await pageState(p));
+        }
         await loginBtn.click();
         const dialog = p.locator('div[role="dialog"]').last();
         const emailInput = dialog.locator('input[type="email"], input[name="email"]').first();
-        await emailInput.waitFor({ state: 'visible', timeout: 15000 });
+        try {
+            await emailInput.waitFor({ state: 'visible', timeout: 15000 });
+        } catch (e) {
+            throw new ArenaError('AUTO_LOGIN_FAILED', 'Clicked Log in but the email field never appeared.' + await pageState(p));
+        }
         await emailInput.fill(creds.email);
         await dialog.getByRole('button', { name: /continue with email/i }).click();
         const passInput = dialog.locator('input[type="password"]').first();
@@ -348,7 +370,7 @@ function resolveModel(models, wanted) {
 async function listModels() {
     return withPage(async (p) => {
         const { models } = await scrapeSiteData(p);
-        if (!models) throw new ArenaError('MODELS_UNAVAILABLE', 'Could not read the model list from arena.ai.');
+        if (!models) throw new ArenaError('MODELS_UNAVAILABLE', 'Could not read the model list from arena.ai.' + await pageState(p));
         return models
             .filter(m => m && m.id && (m.userSelectable !== false))
             .map(m => {
@@ -379,7 +401,7 @@ async function chat({ message, model, conversationId, images, generateImage, gen
             throw new ArenaError('LOGIN_REQUIRED', 'Not logged in to Arena. Set ARENA_EMAIL + ARENA_PASSWORD so the server logs itself in, or refresh ARENA_SESSION_B64 (re-run `npm run session-for-vercel` in the main project).');
         }
         const { models, sitekey } = await scrapeSiteData(p);
-        if (!models) throw new ArenaError('MODELS_UNAVAILABLE', 'Could not read the model list from arena.ai.');
+        if (!models) throw new ArenaError('MODELS_UNAVAILABLE', 'Could not read the model list from arena.ai.' + await pageState(p));
         const modelObj = resolveModel(models, model);
         const { input, output } = modelCaps(modelObj);
         const isVideoModel = !!output.video || (modelObj._arenas || []).some(a => VIDEO_ARENAS.includes(a));
