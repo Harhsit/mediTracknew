@@ -388,7 +388,7 @@ async function mintRecaptcha(p, sitekey, action) {
     return token;
 }
 
-async function uploadImage(p, dataUrl) {
+async function uploadImage(p, dataUrl, accessToken) {
     const m = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/s.exec(String(dataUrl || ''));
     if (!m) throw new ArenaError('BAD_IMAGE', 'Images must be data URLs like "data:image/png;base64,...."');
     const mime = m[1];
@@ -397,26 +397,30 @@ async function uploadImage(p, dataUrl) {
     if (bytes.length > 10 * 1024 * 1024) throw new ArenaError('BAD_IMAGE', 'Image is larger than Arena\'s 10 MB limit.');
     const ext = mime === 'image/jpeg' ? '.jpg' : mime === 'image/webp' ? '.webp' : mime === 'image/gif' ? '.gif' : '.png';
     const fileName = `upload-${uuidv7()}${ext}`;
-    const step1 = await p.evaluate(async ({ fileName, mime }) => {
+    const step1 = await p.evaluate(async ({ fileName, mime, accessToken }) => {
+        const headers = { 'Content-Type': 'application/json' };
+        if (accessToken) headers['Authorization'] = 'Bearer ' + accessToken;
         const res = await fetch('/api/storage/generate-upload-url', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            method: 'POST', headers,
             body: JSON.stringify({ fileName, contentType: mime }),
         });
         return { status: res.status, data: await res.json().catch(() => null) };
-    }, { fileName, mime });
+    }, { fileName, mime, accessToken });
     if (step1.status !== 200 || !step1.data || !step1.data.uploadUrl || !step1.data.key) {
         throw new ArenaError('IMAGE_UPLOAD_FAILED', `Arena refused the image upload (HTTP ${step1.status}).`);
     }
     const put = await fetch(step1.data.uploadUrl, { method: 'PUT', headers: { 'Content-Type': mime }, body: bytes });
     if (!put.ok) throw new ArenaError('IMAGE_UPLOAD_FAILED', `Uploading the image bytes failed (HTTP ${put.status}).`);
     const key = String(step1.data.key).replace(/^\//, '');
-    const step3 = await p.evaluate(async ({ key }) => {
+    const step3 = await p.evaluate(async ({ key, accessToken }) => {
+        const headers = { 'Content-Type': 'application/json' };
+        if (accessToken) headers['Authorization'] = 'Bearer ' + accessToken;
         const res = await fetch('/api/storage/get-signed-url', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            method: 'POST', headers,
             body: JSON.stringify({ key }),
         });
         return { status: res.status, data: await res.json().catch(() => null) };
-    }, { key });
+    }, { key, accessToken });
     if (step3.status !== 200 || !step3.data || !step3.data.url) {
         throw new ArenaError('IMAGE_UPLOAD_FAILED', `Arena did not return a download URL for the image (HTTP ${step3.status}).`);
     }
@@ -506,6 +510,7 @@ async function chat({ message, model, conversationId, images, generateImage, gen
             if (lastAutoLoginError) throw lastAutoLoginError;
             throw new ArenaError('LOGIN_REQUIRED', 'Not logged in to Arena. Set ARENA_EMAIL + ARENA_PASSWORD so the server logs itself in, or refresh ARENA_SESSION_B64 (re-run `npm run session-for-vercel` in the main project).');
         }
+        const accessToken = session.access_token || null;
         const { models, sitekey } = await scrapeSiteData(p);
         if (!models) throw new ArenaError('MODELS_UNAVAILABLE', 'Could not read the model list from arena.ai. [scrape: ' + lastScrapeDebug + ']' + await pageState(p));
         const modelObj = resolveModel(models, model);
@@ -522,7 +527,7 @@ async function chat({ message, model, conversationId, images, generateImage, gen
             throw new ArenaError('IMAGE_NOT_SUPPORTED', `The model "${modelObj.publicName || modelObj.id}" cannot create images. Pick an image model (creates_images: true).`);
         }
         const attachments = [];
-        for (const img of imageList) attachments.push(await uploadImage(p, img));
+        for (const img of imageList) attachments.push(await uploadImage(p, img, accessToken));
         const isFollowUp = !!conversationId;
         const convId = conversationId || uuidv7();
         const payload = {
@@ -536,16 +541,34 @@ async function chat({ message, model, conversationId, images, generateImage, gen
             recaptchaV3Token: await mintRecaptcha(p, sitekey || DEFAULT_SITEKEY, 'chat_submit'),
         };
         const url = isFollowUp ? `/nextjs-api/stream/post-to-evaluation/${convId}` : '/nextjs-api/stream/create-evaluation';
-        const result = await p.evaluate(async ({ url, payload }) => {
+        const result = await p.evaluate(async ({ url, payload, accessToken }) => {
+            // Prefer the token the page's own Supabase client is holding
+            // in localStorage right now (fresh, possibly refreshed after
+            // our cookie snapshot was taken); fall back to the cookie one.
+            let token = accessToken || null;
+            let tokenSource = token ? 'cookie' : 'none';
+            try {
+                for (let i = 0; i < localStorage.length; i++) {
+                    const k = localStorage.key(i);
+                    if (!/auth/i.test(k)) continue;
+                    const parsed = JSON.parse(localStorage.getItem(k));
+                    const t = parsed && (parsed.access_token || (parsed.currentSession && parsed.currentSession.access_token));
+                    if (t) { token = t; tokenSource = 'localStorage:' + k; break; }
+                }
+            } catch (e) { /* keep the cookie token */ }
+            const headers = { 'Content-Type': 'text/plain;charset=UTF-8' };
+            if (token) headers['Authorization'] = 'Bearer ' + token;
             const res = await fetch(url, {
                 method: 'POST',
-                headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+                headers,
                 body: JSON.stringify(payload),
             });
-            return { status: res.status, text: await res.text() };
-        }, { url, payload });
+            let exp = null;
+            if (token) { try { exp = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).exp || null; } catch (e) { /* not a JWT */ } }
+            return { status: res.status, text: await res.text(), tokenSource, tokenExp: exp };
+        }, { url, payload, accessToken });
         if (result.status === 401 || result.status === 403) {
-            throw new ArenaError('UPSTREAM_' + result.status, `Arena rejected the request (HTTP ${result.status}) — session expired or reCAPTCHA refused (serverless browsers score low; a residential ARENA_PROXY helps). Details: ${result.text.slice(0, 200)}`);
+            throw new ArenaError('UPSTREAM_' + result.status, `Arena rejected the request (HTTP ${result.status}) — session expired or reCAPTCHA refused (serverless browsers score low; a residential ARENA_PROXY helps). Details: ${result.text.slice(0, 200)} [token: source=${result.tokenSource || '?'}, exp=${result.tokenExp ? new Date(result.tokenExp * 1000).toISOString() : 'unknown'}]`);
         }
         if (result.status !== 200) {
             throw new ArenaError('UPSTREAM_' + result.status, `Arena returned HTTP ${result.status}: ${result.text.slice(0, 200)}`);
