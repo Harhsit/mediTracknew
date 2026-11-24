@@ -130,6 +130,22 @@ async function gotoArena(p) {
 }
 
 // ---------------------------------------------------------------- session
+// Arena auto-creates an ANONYMOUS Supabase session for every visitor;
+// Direct mode rejects it with 401 LOGIN_GATE. Only a real account
+// session counts as logged in.
+function isRealUserSession(session) {
+    if (!session) return false;
+    if (session._unparsed) return true;
+    const user = session.user;
+    if (!user) return !!session.access_token;
+    if (user.is_anonymous) return false;
+    return !!(user.email || user.id);
+}
+async function getRealSession(p) {
+    const s = await getAuthSession(p).catch(() => null);
+    return isRealUserSession(s) ? s : null;
+}
+
 async function getAuthSession(p) {
     const ctx = p.context();
     const cookies = await ctx.cookies(ORIGIN);
@@ -251,7 +267,7 @@ async function autoLogin(p) {
         await scope.getByRole('button', { name: /^log in$/i }).click();
         // Success = the Supabase auth cookie shows up (checked by caller too).
         for (let i = 0; i < 30; i++) {
-            if (await getAuthSession(p)) return true;
+            if (await getRealSession(p)) return true;
             const text = await p.evaluate(() => (document.body && document.body.innerText || '')).catch(() => '');
             if (/invalid|incorrect|wrong password|try again/i.test(text)) {
                 throw new ArenaError('AUTO_LOGIN_FAILED', 'Arena rejected the email/password (ARENA_EMAIL / ARENA_PASSWORD). Check the env vars.');
@@ -266,10 +282,10 @@ async function autoLogin(p) {
 }
 // Return a live session, auto-logging-in first when credentials are set.
 async function ensureSession(p) {
-    let session = await getAuthSession(p);
+    let session = await getRealSession(p);
     if (session) return session;
     if (await autoLogin(p)) {
-        session = await getAuthSession(p);
+        session = await getRealSession(p);
     }
     return session;
 }

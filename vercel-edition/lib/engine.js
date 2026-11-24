@@ -177,7 +177,7 @@ async function autoLogin(p) {
         await passInput.fill(creds.password);
         await scope.getByRole('button', { name: /^log in$/i }).click();
         for (let i = 0; i < 30; i++) {
-            if (await getAuthSession(p)) return true;
+            if (await getRealSession(p)) return true;
             const text = await p.evaluate(() => (document.body && document.body.innerText || '')).catch(() => '');
             if (/invalid|incorrect|wrong password|try again/i.test(text)) {
                 throw new ArenaError('AUTO_LOGIN_FAILED', 'Arena rejected the email/password (ARENA_EMAIL / ARENA_PASSWORD). Check the Vercel env vars.');
@@ -252,7 +252,7 @@ async function withPage(fn) {
             throw new ArenaError('CLOUDFLARE_BLOCKED', 'Cloudflare is challenging the serverless browser. A residential ARENA_PROXY usually fixes this; without one, Vercel datacenter IPs are often blocked.');
         }
         // No live session? Log in with ARENA_EMAIL/ARENA_PASSWORD if set.
-        const hadSession = !!(await getAuthSession(page).catch(() => null));
+        const hadSession = !!(await getRealSession(page).catch(() => null));
         if (!hadSession) {
             await autoLogin(page);
             // NOTE: a full post-login reload was tried here (to let the
@@ -387,6 +387,23 @@ function modalityFor(m, forceImage, forceVideo) {
     if (forceImage || output.image) return 'image';
     if (output.search) return 'search';
     return 'chat';
+}
+
+// Arena auto-creates an ANONYMOUS Supabase session for every visitor
+// (the provisional-user flow). It satisfies a naive "session exists"
+// check but Direct mode rejects it with 401 LOGIN_GATE — only a real
+// account session counts as logged in.
+function isRealUserSession(session) {
+    if (!session) return false;
+    if (session._unparsed) return true; // cannot tell — do not block
+    const user = session.user;
+    if (!user) return !!session.access_token; // older shape: accept
+    if (user.is_anonymous) return false;
+    return !!(user.email || user.id);
+}
+async function getRealSession(p) {
+    const s = await getAuthSession(p).catch(() => null);
+    return isRealUserSession(s) ? s : null;
 }
 
 async function getAuthSession(p) {
@@ -555,10 +572,10 @@ async function chatOnce({ message, model, conversationId, images, generateImage,
         throw new ArenaError('VIDEO_ON_VERCEL', 'Video creation takes ~10 minutes on Arena — longer than Vercel lets any request run (300 s max). Use the server edition (Render/VPS) for video; text, vision and image creation work here.');
     }
     return withPage(async (p) => {
-        const session = await getAuthSession(p);
+        const session = await getRealSession(p);
         if (!session) {
             if (lastAutoLoginError) throw lastAutoLoginError;
-            throw new ArenaError('LOGIN_REQUIRED', 'Not logged in to Arena. Set ARENA_EMAIL + ARENA_PASSWORD so the server logs itself in, or refresh ARENA_SESSION_B64 (re-run `npm run session-for-vercel` in the main project).');
+            throw new ArenaError('LOGIN_REQUIRED', 'No real Arena account session (only the anonymous visitor session is present — the account login did not complete). Set ARENA_EMAIL + ARENA_PASSWORD so the server logs itself in, or refresh ARENA_SESSION_B64 (re-run `npm run session-for-vercel` in the main project).');
         }
         const accessToken = session.access_token || null;
         const { models, sitekey, dplId } = await scrapeSiteData(p);
@@ -624,7 +641,7 @@ async function chatOnce({ message, model, conversationId, images, generateImage,
             return { status: res.status, text: await res.text(), tokenSource, tokenExp: exp, cookieNames };
         }, { url, payload, accessToken, dplId });
         if (result.status === 401 || result.status === 403) {
-            throw new ArenaError('UPSTREAM_' + result.status, `Arena rejected the request (HTTP ${result.status}) — session expired or reCAPTCHA refused (serverless browsers score low; a residential ARENA_PROXY helps). Details: ${result.text.slice(0, 200)} [token: source=${result.tokenSource || '?'}, exp=${result.tokenExp ? new Date(result.tokenExp * 1000).toISOString() : 'unknown'}, cookies=${(result.cookieNames || []).join(',')}, dpl=${dplId ? 'yes' : 'no'}]`);
+            throw new ArenaError('UPSTREAM_' + result.status, `Arena rejected the request (HTTP ${result.status}) — session expired or reCAPTCHA refused (serverless browsers score low; a residential ARENA_PROXY helps). Details: ${result.text.slice(0, 200)} [token: source=${result.tokenSource || '?'}, exp=${result.tokenExp ? new Date(result.tokenExp * 1000).toISOString() : 'unknown'}, cookies=${(result.cookieNames || []).join(',')}, dpl=${dplId ? 'yes' : 'no'}, sess=${session.user ? (session.user.is_anonymous ? 'anonymous' : 'real') : 'no-user'}]`);
         }
         if (result.status !== 200) {
             throw new ArenaError('UPSTREAM_' + result.status, `Arena returned HTTP ${result.status}: ${result.text.slice(0, 200)}`);
