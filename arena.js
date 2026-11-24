@@ -190,30 +190,51 @@ async function autoLogin(p) {
     autoLoginError = null;
     try {
         await gotoArena(p);
-        if (!(await clickLoginEntry(p))) {
-            throw new ArenaError('AUTO_LOGIN_FAILED', 'The "Log in" button never appeared on arena.ai.');
+        // Click a Log in entry AND verify the dialog's email field really
+        // appears — a click can land before React attaches its handlers,
+        // or on a look-alike element, and silently do nothing. Retry
+        // through the candidate shapes until the dialog is truly open.
+        const emailInput = p.locator('input[type="email"], input[name="email"]').first();
+        let opened = false;
+        const entries = [
+            p.getByRole('button', { name: /log in/i }),
+            p.getByRole('link', { name: /log in/i }),
+            p.locator('a, button').filter({ hasText: /^\s*log\s?in\s*$/i }),
+            p.getByText(/^\s*log\s?in\s*$/i),
+        ];
+        for (const loc of entries) {
+            const el = loc.first();
+            try {
+                await el.waitFor({ state: 'visible', timeout: 3000 });
+                await el.click();
+                await emailInput.waitFor({ state: 'visible', timeout: 4000 });
+                opened = true;
+                break;
+            } catch (e) { /* dialog didn't open from this one — try the next */ }
+        }
+        if (!opened) {
+            throw new ArenaError('AUTO_LOGIN_FAILED', 'The Arena login dialog never opened.');
         }
         const dialog = p.locator('div[role="dialog"]').last();
-        const emailInput = dialog.locator('input[type="email"], input[name="email"]').first();
-        await emailInput.waitFor({ state: 'visible', timeout: 15000 });
+        const scope = (await dialog.count().catch(() => 0)) > 0 ? dialog : p;
         await emailInput.fill(creds.email);
-        await dialog.getByRole('button', { name: /continue with email/i }).click();
-        const passInput = dialog.locator('input[type="password"]').first();
+        await scope.getByRole('button', { name: /continue with email/i }).click();
+        const passInput = p.locator('input[type="password"]').first();
         try {
             await passInput.waitFor({ state: 'visible', timeout: 20000 });
         } catch (e) {
-            const text = await dialog.innerText().catch(() => '');
+            const text = await p.evaluate(() => (document.body && document.body.innerText || '')).catch(() => '');
             if (/verify your email|verification link|create account/i.test(text)) {
                 throw new ArenaError('AUTO_LOGIN_FAILED', 'Arena answered the email step with a create-account / verify-by-email-link screen, not a password field. Auto-login only works for an existing account that has a password. Log in once with `npm run login` (or the session import) for this account.');
             }
             throw new ArenaError('AUTO_LOGIN_FAILED', 'The password field never appeared after the email step. Arena may have changed its login dialog.');
         }
         await passInput.fill(creds.password);
-        await dialog.getByRole('button', { name: /^log in$/i }).click();
+        await scope.getByRole('button', { name: /^log in$/i }).click();
         // Success = the Supabase auth cookie shows up (checked by caller too).
         for (let i = 0; i < 30; i++) {
             if (await getAuthSession(p)) return true;
-            const text = await dialog.innerText().catch(() => '');
+            const text = await p.evaluate(() => (document.body && document.body.innerText || '')).catch(() => '');
             if (/invalid|incorrect|wrong password|try again/i.test(text)) {
                 throw new ArenaError('AUTO_LOGIN_FAILED', 'Arena rejected the email/password (ARENA_EMAIL / ARENA_PASSWORD). Check the env vars.');
             }
