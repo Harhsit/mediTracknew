@@ -112,31 +112,40 @@ async function autoLogin(p) {
         // The Arena app hydrates slowly through a proxy — give it a moment
         // to render before looking for the button.
         await p.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
-        // Click a Log in entry AND verify the dialog's email field really
-        // appears — a click can land before React attaches its handlers,
-        // or on a look-alike element, and silently do nothing. Retry
-        // through the candidate shapes until the dialog is truly open.
-        const emailInput = p.locator('input[type="email"], input[name="email"]').first();
+        // Click a Log in entry AND verify the dialog really opens — a
+        // click can land before React attaches its handlers, or on a
+        // look-alike element, and silently do nothing. The dialog can be
+        // slow through the proxy, so each attempt gets a real chance;
+        // every attempt's failure reason is kept for the error message.
+        const emailInput = p.locator('input[type="email"], input[name="email"], input[placeholder*="email" i]').first();
+        const dialogHeading = p.getByText(/log in or create account/i).first();
         let opened = false;
+        const attempts = [];
         const entries = [
-            p.getByRole('button', { name: /log in/i }),
-            p.getByRole('link', { name: /log in/i }),
-            p.locator('a, button').filter({ hasText: /^\s*log\s?in\s*$/i }),
-            p.getByText(/^\s*log\s?in\s*$/i),
+            ['button-role', p.getByRole('button', { name: /log in/i })],
+            ['link-role', p.getByRole('link', { name: /log in/i })],
+            ['a/button-text', p.locator('a, button').filter({ hasText: /^\s*log\s?in\s*$/i })],
+            ['any-text', p.getByText(/^\s*log\s?in\s*$/i)],
         ];
-        for (const loc of entries) {
+        for (const [name, loc] of entries) {
             const el = loc.first();
             try {
                 await el.waitFor({ state: 'visible', timeout: 3000 });
-                await el.click();
-                await emailInput.waitFor({ state: 'visible', timeout: 4000 });
+                await el.click({ timeout: 5000 });
+                await Promise.race([
+                    emailInput.waitFor({ state: 'visible', timeout: 12000 }),
+                    dialogHeading.waitFor({ state: 'visible', timeout: 12000 }),
+                ]);
                 opened = true;
                 break;
-            } catch (e) { /* dialog didn't open from this one — try the next */ }
+            } catch (e) {
+                attempts.push(name + ' → ' + String(e && e.message || e).split('\n')[0].slice(0, 110));
+            }
         }
         if (!opened) {
-            throw new ArenaError('AUTO_LOGIN_FAILED', 'The Arena login dialog never opened.' + await pageState(p));
+            throw new ArenaError('AUTO_LOGIN_FAILED', 'The Arena login dialog never opened. Attempts: ' + attempts.join(' | ') + await pageState(p));
         }
+        await emailInput.waitFor({ state: 'visible', timeout: 10000 });
         const dialog = p.locator('div[role="dialog"]').last();
         const scope = (await dialog.count().catch(() => 0)) > 0 ? dialog : p;
         await emailInput.fill(creds.email);
