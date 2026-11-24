@@ -246,7 +246,24 @@ async function withPage(fn) {
             throw new ArenaError('CLOUDFLARE_BLOCKED', 'Cloudflare is challenging the serverless browser. A residential ARENA_PROXY usually fixes this; without one, Vercel datacenter IPs are often blocked.');
         }
         // No live session? Log in with ARENA_EMAIL/ARENA_PASSWORD if set.
-        if (!(await getAuthSession(page).catch(() => null))) await autoLogin(page);
+        const hadSession = !!(await getAuthSession(page).catch(() => null));
+        if (!hadSession) {
+            await autoLogin(page);
+            // The dialog login completes client-side only. Do one full
+            // navigation afterwards — a real user's next page load is what
+            // lets Arena's server see the new session, run its middleware
+            // and set any server-side cookies its API gate checks. Without
+            // it, create-evaluation answered 401 LOGIN_GATE even with a
+            // valid, unexpired access token.
+            if (await getAuthSession(page).catch(() => null)) {
+                await page.goto(ORIGIN + '/', { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+                for (let i = 0; i < 8; i++) {
+                    const t = await page.title().catch(() => '');
+                    if (!/just a moment/i.test(t)) break;
+                    await page.waitForTimeout(2000);
+                }
+            }
+        }
         return await fn(page);
     } finally {
         await browser.close().catch(() => {});
@@ -565,10 +582,11 @@ async function chat({ message, model, conversationId, images, generateImage, gen
             });
             let exp = null;
             if (token) { try { exp = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).exp || null; } catch (e) { /* not a JWT */ } }
-            return { status: res.status, text: await res.text(), tokenSource, tokenExp: exp };
+            const cookieNames = document.cookie.split(';').map(s => s.trim().split('=')[0]).filter(Boolean);
+            return { status: res.status, text: await res.text(), tokenSource, tokenExp: exp, cookieNames };
         }, { url, payload, accessToken });
         if (result.status === 401 || result.status === 403) {
-            throw new ArenaError('UPSTREAM_' + result.status, `Arena rejected the request (HTTP ${result.status}) — session expired or reCAPTCHA refused (serverless browsers score low; a residential ARENA_PROXY helps). Details: ${result.text.slice(0, 200)} [token: source=${result.tokenSource || '?'}, exp=${result.tokenExp ? new Date(result.tokenExp * 1000).toISOString() : 'unknown'}]`);
+            throw new ArenaError('UPSTREAM_' + result.status, `Arena rejected the request (HTTP ${result.status}) — session expired or reCAPTCHA refused (serverless browsers score low; a residential ARENA_PROXY helps). Details: ${result.text.slice(0, 200)} [token: source=${result.tokenSource || '?'}, exp=${result.tokenExp ? new Date(result.tokenExp * 1000).toISOString() : 'unknown'}, cookies=${(result.cookieNames || []).join(',')}]`);
         }
         if (result.status !== 200) {
             throw new ArenaError('UPSTREAM_' + result.status, `Arena returned HTTP ${result.status}: ${result.text.slice(0, 200)}`);

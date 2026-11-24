@@ -268,7 +268,13 @@ async function autoLogin(p) {
 async function ensureSession(p) {
     let session = await getAuthSession(p);
     if (session) return session;
-    if (await autoLogin(p)) session = await getAuthSession(p);
+    if (await autoLogin(p)) {
+        // The dialog login completes client-side only; one full navigation
+        // lets Arena's server see the session and set any server-side
+        // cookies its API gate checks (without it: 401 LOGIN_GATE).
+        await gotoArena(p).catch(() => {});
+        session = await getAuthSession(p);
+    }
     return session;
 }
 
