@@ -255,18 +255,13 @@ async function withPage(fn) {
         const hadSession = !!(await getAuthSession(page).catch(() => null));
         if (!hadSession) {
             await autoLogin(page);
-            // The dialog login completes client-side only. Do one full
-            // navigation afterwards — a real user's next page load is what
-            // lets Arena's server see the new session, run its middleware
-            // and set any server-side cookies its API gate checks. Without
-            // it, create-evaluation answered 401 LOGIN_GATE even with a
-            // valid, unexpired access token.
-            if (await getAuthSession(page).catch(() => null)) {
-                await page.goto(ORIGIN + '/?mode=direct', { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
-                if (!(await waitOutCloudflare(page))) {
-                    throw new ArenaError('CLOUDFLARE_BLOCKED', 'Cloudflare challenged the post-login reload. A residential ARENA_PROXY usually fixes this.');
-                }
-            }
+            // NOTE: a full post-login reload was tried here (to let the
+            // server "register" the session) — in practice it just rolled
+            // the Cloudflare dice a second time and killed run after run
+            // before the chat POST was ever reached. The working bridges
+            // never reload; the in-page catalog/document fetches in
+            // scrapeSiteData already touch Arena's server with the new
+            // session cookies.
         }
         return await fn(page);
     } finally {
