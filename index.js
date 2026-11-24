@@ -65,15 +65,36 @@ function requireKey(req, res, next) {
 }
 
 // ---------------------------------------------------------------- admin
-const sessions = new Map(); // sid -> { username, at }
+// Admin sessions are STATELESS signed tokens (HMAC over the payload, keyed
+// with the admin password). The previous design kept sessions in an
+// in-memory Map — on serverless hosts (Vercel) every request can land on a
+// different instance with an empty Map, so a correct login was instantly
+// "forgotten" and the dashboard looked stuck. A signed cookie verifies
+// anywhere, no server memory needed. (Logout clears the cookie; a token
+// stays valid until its 12 h expiry, the usual stateless-session tradeoff.)
 const loginFails = { count: 0, until: 0 };
+function sessionSecret() { return 'arena-admin|' + ADMIN_USERNAME + '|' + ADMIN_PASSWORD; }
+function makeSessionToken(username) {
+    const payload = Buffer.from(JSON.stringify({ u: username, exp: Date.now() + 12 * 3600 * 1000 })).toString('base64url');
+    const sig = crypto.createHmac('sha256', sessionSecret()).update(payload).digest('base64url');
+    return payload + '.' + sig;
+}
 function adminSession(req) {
+    if (!ADMIN_PASSWORD) return null;
     const cookie = req.headers.cookie || '';
-    const m = cookie.match(/arena_admin=([a-f0-9]{48})/);
+    const m = cookie.match(/arena_admin=([A-Za-z0-9_\-.]+)/);
     if (!m) return null;
-    const s = sessions.get(m[1]);
-    if (!s || Date.now() - s.at > 12 * 3600 * 1000) return null;
-    return s;
+    const dot = m[1].lastIndexOf('.');
+    if (dot < 1) return null;
+    const payload = m[1].slice(0, dot), sig = m[1].slice(dot + 1);
+    const expected = crypto.createHmac('sha256', sessionSecret()).update(payload).digest('base64url');
+    const a = Buffer.from(sig), b = Buffer.from(expected);
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+    try {
+        const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+        if (!data || data.u !== ADMIN_USERNAME || !data.exp || Date.now() > data.exp) return null;
+        return { username: data.u };
+    } catch (e) { return null; }
 }
 function requireAdmin(req, res, next) {
     if (!adminSession(req)) return res.status(401).json({ status: 'error', message: 'Admin login required' });
@@ -89,9 +110,8 @@ app.post('/api/admin/login', (req, res) => {
     const { username, password } = req.body || {};
     if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
         loginFails.count = 0;
-        const sid = crypto.randomBytes(24).toString('hex');
-        sessions.set(sid, { username, at: Date.now() });
-        res.setHeader('Set-Cookie', `arena_admin=${sid}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${12 * 3600}`);
+        const token = makeSessionToken(username);
+        res.setHeader('Set-Cookie', `arena_admin=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${12 * 3600}`);
         return res.json({ status: 'success', username: ADMIN_USERNAME });
     }
     loginFails.count++;
@@ -99,9 +119,6 @@ app.post('/api/admin/login', (req, res) => {
     return res.status(401).json({ status: 'error', message: 'Wrong username or password.' });
 });
 app.post('/api/admin/logout', (req, res) => {
-    const cookie = req.headers.cookie || '';
-    const m = cookie.match(/arena_admin=([a-f0-9]{48})/);
-    if (m) sessions.delete(m[1]);
     res.setHeader('Set-Cookie', 'arena_admin=; HttpOnly; Path=/; Max-Age=0');
     res.json({ status: 'success' });
 });
