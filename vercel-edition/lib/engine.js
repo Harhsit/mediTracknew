@@ -71,6 +71,28 @@ async function pageState(p) {
     } catch (e) { return ' [page state unavailable]'; }
 }
 
+// Arena's logged-out page has more than one "Log in" entry (a promo
+// banner and a sidebar/footer one) and they are not all <button>s — the
+// strict getByRole('button') lookup missed them entirely while the text
+// was right there on the page. Try each shape in turn.
+async function clickLoginEntry(p) {
+    const candidates = [
+        p.getByRole('button', { name: /log in/i }),
+        p.getByRole('link', { name: /log in/i }),
+        p.locator('a, button').filter({ hasText: /^\s*log\s?in\s*$/i }),
+        p.getByText(/^\s*log\s?in\s*$/i),
+    ];
+    for (const loc of candidates) {
+        const el = loc.first();
+        try {
+            await el.waitFor({ state: 'visible', timeout: 4000 });
+            await el.click();
+            return true;
+        } catch (e) { /* not this one — try the next shape */ }
+    }
+    return false;
+}
+
 // ------------------------------------------------------------ auto-login
 // With ARENA_EMAIL + ARENA_PASSWORD set, the function logs ITSELF in
 // through Arena's dialog (email → Continue with email → password → Log In)
@@ -89,14 +111,10 @@ async function autoLogin(p) {
     try {
         // The Arena app hydrates slowly through a proxy — give it a moment
         // to render before looking for the button.
-        await p.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
-        const loginBtn = p.getByRole('button', { name: /^log in$/i }).first();
-        try {
-            await loginBtn.waitFor({ state: 'visible', timeout: 30000 });
-        } catch (e) {
+        await p.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
+        if (!(await clickLoginEntry(p))) {
             throw new ArenaError('AUTO_LOGIN_FAILED', 'The "Log in" button never appeared on arena.ai.' + await pageState(p));
         }
-        await loginBtn.click();
         const dialog = p.locator('div[role="dialog"]').last();
         const emailInput = dialog.locator('input[type="email"], input[name="email"]').first();
         try {

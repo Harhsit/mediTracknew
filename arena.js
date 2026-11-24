@@ -154,6 +154,27 @@ async function getAuthSession(p) {
 //   → password field (existing accounts) → "Log In".
 // The password comes only from the environment and is never logged.
 // Attempts are throttled: at most one try per minute after a failure.
+// Arena's logged-out page has more than one "Log in" entry (a promo
+// banner and a sidebar/footer one) and they are not all <button>s — a
+// strict getByRole('button') lookup misses them. Try each shape in turn.
+async function clickLoginEntry(p) {
+    const candidates = [
+        p.getByRole('button', { name: /log in/i }),
+        p.getByRole('link', { name: /log in/i }),
+        p.locator('a, button').filter({ hasText: /^\s*log\s?in\s*$/i }),
+        p.getByText(/^\s*log\s?in\s*$/i),
+    ];
+    for (const loc of candidates) {
+        const el = loc.first();
+        try {
+            await el.waitFor({ state: 'visible', timeout: 4000 });
+            await el.click();
+            return true;
+        } catch (e) { /* not this one — try the next shape */ }
+    }
+    return false;
+}
+
 let lastAutoLoginTry = 0;
 let autoLoginError = null;
 function autoLoginCreds() {
@@ -169,9 +190,9 @@ async function autoLogin(p) {
     autoLoginError = null;
     try {
         await gotoArena(p);
-        const loginBtn = p.getByRole('button', { name: /^log in$/i }).first();
-        await loginBtn.waitFor({ state: 'visible', timeout: 15000 });
-        await loginBtn.click();
+        if (!(await clickLoginEntry(p))) {
+            throw new ArenaError('AUTO_LOGIN_FAILED', 'The "Log in" button never appeared on arena.ai.');
+        }
         const dialog = p.locator('div[role="dialog"]').last();
         const emailInput = dialog.locator('input[type="email"], input[name="email"]').first();
         await emailInput.waitFor({ state: 'visible', timeout: 15000 });
