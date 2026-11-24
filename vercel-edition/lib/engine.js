@@ -141,7 +141,10 @@ async function autoLogin(p) {
         for (const [name, loc] of entries) {
             const el = loc.first();
             try {
-                await el.waitFor({ state: 'visible', timeout: 3000 });
+                // Through the proxy the app can take a while to render the
+                // header/sidebar at all — the first candidate gets a long
+                // window, later ones shorter (page is warm by then).
+                await el.waitFor({ state: 'visible', timeout: attempts.length === 0 ? 25000 : 6000 });
                 if (!(await tryClick(el))) throw new Error('all click styles failed');
                 await Promise.race([
                     emailInput.waitFor({ state: 'visible', timeout: 12000 }),

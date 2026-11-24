@@ -217,7 +217,7 @@ async function autoLogin(p) {
         for (const [name, loc] of entries) {
             const el = loc.first();
             try {
-                await el.waitFor({ state: 'visible', timeout: 3000 });
+                await el.waitFor({ state: 'visible', timeout: attempts.length === 0 ? 25000 : 6000 });
                 if (!(await tryClick(el))) throw new Error('all click styles failed');
                 await Promise.race([
                     emailInput.waitFor({ state: 'visible', timeout: 12000 }),
