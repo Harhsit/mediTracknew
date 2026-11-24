@@ -214,18 +214,27 @@ async function withPage(fn) {
 }
 
 // ------------------------------------------------------------ site data
+let lastScrapeDebug = '';
 async function scrapeSiteData(p) {
     const html = await p.content();
     let sitekey = null;
     const sk = html.match(/recaptcha\/(?:enterprise|api)\.js\?render=([0-9A-Za-z_-]{8,200})/);
     if (sk) sitekey = sk[1];
     let models = null;
+    let catalogDebug = 'not-tried';
     try {
-        const catalog = await p.evaluate(async () => {
-            const res = await fetch('/nextjs-api/model-catalog');
-            if (!res.ok) return null;
-            return await res.json().catch(() => null);
+        const out = await p.evaluate(async () => {
+            try {
+                const res = await fetch('/nextjs-api/model-catalog');
+                const text = await res.text();
+                let json = null;
+                try { json = JSON.parse(text); } catch (e) { /* not json */ }
+                return { status: res.status, isArray: Array.isArray(json), snippet: text.slice(0, 120), json };
+            } catch (e) { return { error: String(e && e.message || e) }; }
         });
+        if (out && out.error) catalogDebug = 'fetch threw: ' + out.error;
+        else if (out) catalogDebug = `HTTP ${out.status}, array=${out.isArray}, body starts: ${out.snippet}`;
+        const catalog = out && out.json;
         if (Array.isArray(catalog)) {
             const byId = new Map();
             for (const section of catalog) {
@@ -250,6 +259,7 @@ async function scrapeSiteData(p) {
         }
         if (Array.isArray(models)) models = models.map(mo => ({ ...mo, _arenas: [] }));
     }
+    lastScrapeDebug = `catalog: ${catalogDebug}; htmlLen=${html.length}, hasInitialModels=${html.includes('initialModels')}`;
     return { models, sitekey: sitekey || DEFAULT_SITEKEY };
 }
 
@@ -388,7 +398,7 @@ function resolveModel(models, wanted) {
 async function listModels() {
     return withPage(async (p) => {
         const { models } = await scrapeSiteData(p);
-        if (!models) throw new ArenaError('MODELS_UNAVAILABLE', 'Could not read the model list from arena.ai.' + await pageState(p));
+        if (!models) throw new ArenaError('MODELS_UNAVAILABLE', 'Could not read the model list from arena.ai. [scrape: ' + lastScrapeDebug + ']' + await pageState(p));
         return models
             .filter(m => m && m.id && (m.userSelectable !== false))
             .map(m => {
@@ -419,7 +429,7 @@ async function chat({ message, model, conversationId, images, generateImage, gen
             throw new ArenaError('LOGIN_REQUIRED', 'Not logged in to Arena. Set ARENA_EMAIL + ARENA_PASSWORD so the server logs itself in, or refresh ARENA_SESSION_B64 (re-run `npm run session-for-vercel` in the main project).');
         }
         const { models, sitekey } = await scrapeSiteData(p);
-        if (!models) throw new ArenaError('MODELS_UNAVAILABLE', 'Could not read the model list from arena.ai.' + await pageState(p));
+        if (!models) throw new ArenaError('MODELS_UNAVAILABLE', 'Could not read the model list from arena.ai. [scrape: ' + lastScrapeDebug + ']' + await pageState(p));
         const modelObj = resolveModel(models, model);
         const { input, output } = modelCaps(modelObj);
         const isVideoModel = !!output.video || (modelObj._arenas || []).some(a => VIDEO_ARENAS.includes(a));
