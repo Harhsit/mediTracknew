@@ -132,6 +132,40 @@ async function autoLogin(p) {
         const dialogHeading = p.getByText(/log in or create account/i).first();
         let opened = false;
         const attempts = [];
+        const dialogOpened = async (ms) => {
+            try {
+                await Promise.race([
+                    emailInput.waitFor({ state: 'visible', timeout: ms }),
+                    dialogHeading.waitFor({ state: 'visible', timeout: ms }),
+                ]);
+                return true;
+            } catch (e) { return false; }
+        };
+        // DOM-first entry: on the /text/direct layout the "Log In" entries
+        // exist in the DOM but Playwright never calls them visible (they
+        // sit in a collapsed sidebar), so locator waits starve. Scan the
+        // DOM, prefer visible candidates, click via JS, verify the dialog.
+        for (const visibleOnly of [true, false]) {
+            try {
+                const clicked = await p.evaluate((visibleOnly) => {
+                    const els = Array.from(document.querySelectorAll('a, button, [role="button"], div, span'));
+                    const matches = els.filter(e => /^\s*log\s?in\s*$/i.test(e.textContent || ''));
+                    const isVis = (e) => {
+                        const r = e.getBoundingClientRect();
+                        const st = getComputedStyle(e);
+                        return r.width > 0 && r.height > 0 && st.display !== 'none' && st.visibility !== 'hidden';
+                    };
+                    const pool = visibleOnly ? matches.filter(isVis) : matches;
+                    if (!pool.length) return 0;
+                    pool[0].click();
+                    return pool.length;
+                }, visibleOnly);
+                attempts.push(`dom-${visibleOnly ? 'visible' : 'any'} → clicked ${clicked}`);
+                if (clicked && await dialogOpened(12000)) { opened = true; break; }
+            } catch (e) {
+                attempts.push(`dom-${visibleOnly ? 'visible' : 'any'} → ` + String(e && e.message || e).split('\n')[0].slice(0, 110));
+            }
+        }
         const entries = [
             ['button-role', p.getByRole('button', { name: /log in/i })],
             ['link-role', p.getByRole('link', { name: /log in/i })],
@@ -139,17 +173,12 @@ async function autoLogin(p) {
             ['any-text', p.getByText(/^\s*log\s?in\s*$/i)],
         ];
         for (const [name, loc] of entries) {
+            if (opened) break;
             const el = loc.first();
             try {
-                // Through the proxy the app can take a while to render the
-                // header/sidebar at all — the first candidate gets a long
-                // window, later ones shorter (page is warm by then).
                 await el.waitFor({ state: 'visible', timeout: attempts.length === 0 ? 25000 : 6000 });
                 if (!(await tryClick(el))) throw new Error('all click styles failed');
-                await Promise.race([
-                    emailInput.waitFor({ state: 'visible', timeout: 12000 }),
-                    dialogHeading.waitFor({ state: 'visible', timeout: 12000 }),
-                ]);
+                if (!(await dialogOpened(12000))) throw new Error('click landed but dialog did not open');
                 opened = true;
                 break;
             } catch (e) {
