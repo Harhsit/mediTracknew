@@ -340,7 +340,9 @@ async function mintRecaptcha(p, sitekey, action) {
                 setTimeout(() => reject(new Error('recaptcha script load timeout')), 15000);
             });
         }
-        await window.grecaptcha.enterprise.ready();
+        // ready() takes a CALLBACK — calling it bare throws
+        // "Invalid listener argument" inside recaptcha's own code.
+        await new Promise((resolve) => window.grecaptcha.enterprise.ready(resolve));
         return window.grecaptcha.enterprise.execute(sitekey, { action });
     }, { sitekey, action }).catch(err => { throw new ArenaError('RECAPTCHA_FAILED', `reCAPTCHA token could not be minted: ${err.message}`); });
     if (!token) throw new ArenaError('RECAPTCHA_FAILED', 'reCAPTCHA returned an empty token — the serverless browser/IP score is likely too low. Setting ARENA_PROXY to a residential proxy is the main fix.');
