@@ -386,23 +386,37 @@ async function getAuthSession(p) {
 }
 
 async function mintRecaptcha(p, sitekey, action) {
-    const token = await p.evaluate(async ({ sitekey, action }) => {
-        if (!window.grecaptcha || !window.grecaptcha.enterprise) {
-            await new Promise((resolve, reject) => {
-                const s = document.createElement('script');
-                s.src = `https://www.google.com/recaptcha/enterprise.js?render=${sitekey}`;
-                s.onload = resolve; s.onerror = () => reject(new Error('recaptcha script failed to load'));
-                document.head.appendChild(s);
-                setTimeout(() => reject(new Error('recaptcha script load timeout')), 15000);
-            });
+    // The enterprise.js load itself is flaky through a rotating proxy
+    // (one bad egress IP and Google refuses the script). Retry the whole
+    // mint up to 3 times, dropping any half-loaded script between tries —
+    // a retry usually lands on a different connection/IP.
+    let lastErr = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+        const token = await p.evaluate(async ({ sitekey, action }) => {
+            if (!window.grecaptcha || !window.grecaptcha.enterprise) {
+                await new Promise((resolve, reject) => {
+                    const s = document.createElement('script');
+                    s.src = `https://www.google.com/recaptcha/enterprise.js?render=${sitekey}`;
+                    s.onload = resolve; s.onerror = () => reject(new Error('recaptcha script failed to load'));
+                    document.head.appendChild(s);
+                    setTimeout(() => reject(new Error('recaptcha script load timeout')), 15000);
+                });
+            }
+            // ready() takes a CALLBACK — calling it bare throws
+            // "Invalid listener argument" inside recaptcha's own code.
+            await new Promise((resolve) => window.grecaptcha.enterprise.ready(resolve));
+            return window.grecaptcha.enterprise.execute(sitekey, { action });
+        }, { sitekey, action }).catch(err => { lastErr = err; return null; });
+        if (token) return token;
+        if (attempt < 3) {
+            await p.evaluate(() => {
+                document.querySelectorAll('script[src*="recaptcha"]').forEach(s => s.remove());
+                try { delete window.grecaptcha; } catch (e) { window.grecaptcha = undefined; }
+            }).catch(() => {});
+            await p.waitForTimeout(2500);
         }
-        // ready() takes a CALLBACK — calling it bare throws
-        // "Invalid listener argument" inside recaptcha's own code.
-        await new Promise((resolve) => window.grecaptcha.enterprise.ready(resolve));
-        return window.grecaptcha.enterprise.execute(sitekey, { action });
-    }, { sitekey, action }).catch(err => { throw new ArenaError('RECAPTCHA_FAILED', `reCAPTCHA token could not be minted: ${err.message}`); });
-    if (!token) throw new ArenaError('RECAPTCHA_FAILED', 'reCAPTCHA returned an empty token — the serverless browser/IP score is likely too low. Setting ARENA_PROXY to a residential proxy is the main fix.');
-    return token;
+    }
+    throw new ArenaError('RECAPTCHA_FAILED', `reCAPTCHA token could not be minted after 3 attempts: ${lastErr ? lastErr.message : 'empty token'} — the serverless browser/IP score is likely too low. Setting ARENA_PROXY to a residential proxy is the main fix.`);
 }
 
 async function uploadImage(p, dataUrl, accessToken) {
