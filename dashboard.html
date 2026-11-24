@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Arena AI Wrapper — Dashboard</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Segoe UI", system-ui, -apple-system, sans-serif; min-height: 100vh; color: #1c2440; background: linear-gradient(135deg, #ffe9f3 0%, #e6f0ff 45%, #e9fbf3 100%); padding: 18px 14px 60px; }
+  .glass { background: rgba(255,255,255,.55); backdrop-filter: blur(18px) saturate(160%); -webkit-backdrop-filter: blur(18px) saturate(160%); border: 1px solid rgba(255,255,255,.65); border-radius: 20px; box-shadow: 0 10px 34px rgba(60,70,140,.14); }
+  .nav { max-width: 880px; margin: 0 auto 16px; padding: 12px 20px; display: flex; align-items: center; gap: 14px; }
+  .nav .logo { font-size: 20px; font-weight: 800; } .nav .logo span { color: #7c3aed; }
+  .nav a { color: #3b4a8f; text-decoration: none; font-weight: 600; font-size: 14px; } .nav a:hover { text-decoration: underline; }
+  .nav .spacer { flex: 1; }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  .card { padding: 24px; margin-bottom: 16px; }
+  h1 { font-size: 24px; margin-bottom: 6px; } h2 { font-size: 18px; margin-bottom: 12px; }
+  p.sub { color: #5a6480; font-size: 14px; margin-bottom: 16px; line-height: 1.5; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+  .tab { padding: 9px 18px; border-radius: 999px; border: 1px solid rgba(124,58,237,.35); background: rgba(255,255,255,.5); cursor: pointer; font-weight: 700; font-size: 14px; color: #4c1d95; }
+  .tab.active { background: #7c3aed; color: #fff; }
+  input[type=text], input[type=password] { width: 100%; padding: 11px 14px; border-radius: 12px; border: 1px solid rgba(90,100,160,.3); background: rgba(255,255,255,.8); font-size: 15px; margin-bottom: 10px; }
+  button.primary { background: #7c3aed; color: #fff; border: none; padding: 11px 22px; border-radius: 12px; font-size: 15px; font-weight: 700; cursor: pointer; }
+  button.primary:hover { background: #6d28d9; } button.primary:disabled { opacity: .5; cursor: wait; }
+  button.ghost { background: rgba(255,255,255,.6); border: 1px solid rgba(90,100,160,.3); padding: 8px 14px; border-radius: 10px; font-weight: 600; cursor: pointer; font-size: 13px; }
+  button.danger { background: #fee2e2; color: #b91c1c; border: 1px solid #fecaca; padding: 7px 12px; border-radius: 10px; font-weight: 600; cursor: pointer; font-size: 13px; }
+  .msg { font-size: 14px; margin-top: 10px; min-height: 20px; } .msg.err { color: #b91c1c; } .msg.ok { color: #047857; }
+  .newkey { background: rgba(209,250,229,.75); border: 1px dashed #059669; border-radius: 14px; padding: 14px; margin-top: 12px; display: none; }
+  .newkey code { font-size: 15px; word-break: break-all; font-weight: 700; color: #065f46; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; } th, td { text-align: left; padding: 9px 8px; border-bottom: 1px solid rgba(90,100,160,.15); vertical-align: top; }
+  th { color: #5a6480; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  code, pre { font-family: Consolas, "Courier New", monospace; }
+  pre { background: rgba(20,24,48,.92); color: #d6e4ff; padding: 14px; border-radius: 12px; overflow-x: auto; font-size: 13px; line-height: 1.55; margin: 8px 0 14px; }
+  .howto h3 { font-size: 15px; margin: 18px 0 6px; color: #4c1d95; } .howto p, .howto li { font-size: 14px; line-height: 1.6; color: #2c3555; }
+  .howto ul, .howto ol { margin: 6px 0 10px 20px; } .howto code { background: rgba(124,58,237,.12); padding: 1px 6px; border-radius: 6px; font-size: 13px; }
+  .pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+  .pill.on { background: #d1fae5; color: #065f46; } .pill.off { background: #fee2e2; color: #991b1b; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+  <div class="nav glass">
+    <div class="logo">🏟️ Arena <span>Wrapper</span></div>
+    <div class="spacer"></div>
+    <a href="/">← Home / Chat</a>
+  </div>
+
+  <div class="wrap">
+    <!-- Admin login -->
+    <div class="card glass" id="loginCard">
+      <h1>🔐 Admin login</h1>
+      <p class="sub">Only the admin can open this dashboard to create, list or revoke API keys. The username and password are the <b>ADMIN_USERNAME</b> / <b>ADMIN_PASSWORD</b> you set when starting the server.</p>
+      <input type="text" id="adminUser" placeholder="Admin username" autocomplete="username">
+      <input type="password" id="adminPass" placeholder="Admin password" autocomplete="current-password">
+      <button class="primary" id="loginBtn">Log in</button>
+      <div class="msg" id="loginMsg"></div>
+    </div>
+
+    <div id="adminArea" class="hidden">
+      <div class="card glass" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+        <div>Logged in as <b id="adminName">admin</b></div>
+        <div>Arena login: <span class="pill off" id="arenaPill">checking…</span></div>
+        <div class="spacer" style="flex:1"></div>
+        <button class="ghost" id="logoutBtn">Log out</button>
+      </div>
+
+      <div class="tabs">
+        <button class="tab active" data-tab="keys">🔑 Create API Key</button>
+        <button class="tab" data-tab="howto">📖 How to Use</button>
+      </div>
+
+      <!-- Keys tab -->
+      <div id="tab-keys">
+        <div class="card glass">
+          <h2>☁️ Arena session (for deployed servers)</h2>
+          <p class="sub">Running this site on a server (Render, Railway, a VPS)? The server needs your Arena login. On your own computer run <code>npm run login</code> once, then <code>npm run export-session</code> — that makes <code>arena-profile.zip</code>. Upload it here and this server chats as your logged-in account. Your Arena password never leaves your computer — only the browser session travels. If chats later fail with LOGIN_REQUIRED, export and import a fresh zip.</p>
+          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+            <input type="file" id="sessionFile" accept=".zip" />
+            <button id="importSessionBtn">⬆ Import Arena session</button>
+            <span class="sub" id="importSessionMsg"></span>
+          </div>
+        </div>
+
+        <div class="card glass">
+          <h2>Your fixed key (ARENA_API_KEY)</h2>
+          <p class="sub">If the server was started with a fixed key in its environment, it is shown here — this key always works and never gets wiped. Copy it into your app or site and you are done.</p>
+          <div id="masterKeyBox"><p class="sub">Loading…</p></div>
+        </div>
+
+        <div class="card glass">
+          <h2>Create a new API key</h2>
+          <p class="sub">Created keys are stored on this machine (keys.json). Give the key a label (for example the app that will use it), create it, and copy it right away — the full key is shown only once.</p>
+          <input type="text" id="keyLabel" placeholder="Label, e.g. My Android app">
+          <button class="primary" id="createKeyBtn">Create API key</button>
+          <div class="msg" id="keyMsg"></div>
+          <div class="newkey" id="newKeyBox">
+            <div style="font-size:13px; margin-bottom:6px;">✅ Your new key — copy it now, it will not be shown again:</div>
+            <code id="newKeyText"></code>
+            <div style="margin-top:10px;"><button class="ghost" id="copyNewKey">📋 Copy key</button></div>
+          </div>
+        </div>
+
+        <div class="card glass">
+          <h2>Your keys</h2>
+          <div id="keysTable"><p class="sub">Loading…</p></div>
+        </div>
+      </div>
+
+      <!-- How to tab -->
+      <div id="tab-howto" class="hidden">
+        <div class="card glass howto">
+          <h2>How to use your API key</h2>
+
+          <h3>1) First, the Arena login (one time)</h3>
+          <p>This server answers chats through <b>your own Arena account</b> in a browser it keeps on this machine. Before the first chat, log in once:</p>
+          <pre>npm run login</pre>
+          <p>A browser window opens on arena.ai — log in there (Google or email) and close nothing; the script saves the session by itself. If chats later start failing with "LOGIN_REQUIRED", just run it again. Arena has no official API and no anonymous chat, so this login is what everything stands on.</p>
+
+          <h3>2) Reach this server — local</h3>
+          <p>Start it with <code>npm start</code>. While it runs on this computer, your apps use:</p>
+          <ul>
+            <li>Dashboard: <code id="dashUrl">this page</code></li>
+            <li>Chat endpoint: <code>POST <span class="origin"></span>/api/chat</code></li>
+            <li>Models list: <code>GET <span class="origin"></span>/api/models</code></li>
+          </ul>
+          <p>From another device on the same Wi-Fi, replace <code>localhost</code> with this computer's local IP address. This wrapper is built to run locally — Arena's protections (Cloudflare + reCAPTCHA) punish datacenter servers, which is exactly why the research says the surviving wrappers run on a home machine.</p>
+
+          <h3>3) Two kinds of key — which one to use</h3>
+          <ul>
+            <li><b>Fixed key</b> (set as <code>ARENA_API_KEY</code> when starting the server): one key that always works. Best for your own apps — set it once and forget it.</li>
+            <li><b>Created keys</b> (made on this page): one key per app or person, revocable anytime. Stored in <code>keys.json</code> on this machine.</li>
+          </ul>
+          <p>Send the key as a header: <code>Authorization: Bearer YOUR_KEY</code> (or <code>x-api-key: YOUR_KEY</code>). A wrong or revoked key gets <code>401</code>. If the server was started with <code>ALLOW_KEYLESS_CHAT=true</code>, sending no key also works — a wrong key still gets 401.</p>
+
+          <h3>4) Send a chat</h3>
+          <pre>POST <span class="origin"></span>/api/chat
+Authorization: Bearer YOUR_KEY
+Content-Type: application/json
+
+{
+  "message": "What is 2+2? Answer with just the number",
+  "model": "gpt-6-luna-max"
+}</pre>
+          <p>Reply:</p>
+          <pre>{
+  "status": "success",
+  "reply": "4",
+  "model_used": "gpt-6-luna-max",
+  "model_id": "…",
+  "conversation_id": "…"
+}</pre>
+          <p><b>Continue the same conversation:</b> send the returned <code>conversation_id</code> back in your next request and the model remembers the context. Omit it to start fresh.</p>
+
+          <h3>5) Choosing a model</h3>
+          <p>Put the model's name in <code>"model"</code>. Names come from Arena itself and change over time — the live list is always at <code>GET /api/models</code>. Current list:</p>
+          <div id="modelsTable"><p class="sub">Loading models… (needs the Arena browser; can take a few seconds)</p></div>
+          <p>Leave <code>"model"</code> out and Arena's first available model is used. Note: chats run <b>one at a time</b> through the single logged-in browser, so replies arrive in turn — allow generous timeouts (a chat can take 10–60 seconds).</p>
+          <p>Filter the table: <button class="ghost" data-mfilter="all">🌐 All</button> <button class="ghost" data-mfilter="text">💬 Text</button> <button class="ghost" data-mfilter="vision">👁 Sees images</button> <button class="ghost" data-mfilter="image">🎨 Creates images</button> <button class="ghost" data-mfilter="video">🎬 Creates video</button> <span id="modelsCount" style="font-size:13px; color:#5a6480;"></span></p>
+
+          <h3>6) Images — send one, and get one created</h3>
+          <p><b>Send an image</b> (vision models only — the models table below marks them): add <code>"image"</code> with a data URL, or <code>"images"</code> with a list of data URLs. The server uploads the image to Arena's own storage the same way the website does, then attaches it to your message. Max 10 MB per image.</p>
+          <pre>{
+  "message": "What is in this picture?",
+  "model": "gpt-6-luna-max",
+  "image": "data:image/png;base64,iVBORw0KGgo..."
+}</pre>
+          <p><b>Create an image</b> (image models only): add <code>"generateImage": true</code> and describe the picture in <code>"message"</code>. The created image comes back in the reply's <code>images</code> list — each entry has a <code>url</code> and/or a <code>data_url</code>:</p>
+          <pre>{
+  "message": "A red bicycle on a beach at sunset",
+  "model": "&lt;an image model from /api/models&gt;",
+  "generateImage": true
+}</pre>
+          <pre>{
+  "status": "success",
+  "reply": "",
+  "images": [{ "url": "https://…", "mime_type": "image/png" }],
+  "model_used": "…",
+  "conversation_id": "…"
+}</pre>
+          <p>Asking a model for something it cannot do fails fast with a clear error (<code>IMAGE_NOT_SUPPORTED</code>) instead of silently dropping your image.</p>
+          <p><b>Create a video</b>: add <code>"generateVideo": true</code> and describe the video in <code>"message"</code>. There is <b>no model selection for video</b> — any <code>"model"</code> you send is ignored and the server picks a <b>random video model</b> (veo, sora, kling and friends) for each new video; the reply's <code>model_used</code> tells you which one was drawn. The video itself comes back in the reply's <code>videos</code> list (<code>url</code> / <code>data_url</code>). The model list comes from Arena's full model catalog, so video and image models are all included — that catalog is also what the filters above use.</p>
+
+          <h3>7) JavaScript (browser / Node)</h3>
+          <pre>const res = await fetch("<span class="origin"></span>/api/chat", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer YOUR_KEY"
+  },
+  body: JSON.stringify({ message: "Hello!", model: "gpt-6-luna-max" })
+});
+const data = await res.json();
+console.log(data.reply);</pre>
+
+          <h3>8) Python</h3>
+          <pre>import requests
+
+r = requests.post(
+    "<span class="origin"></span>/api/chat",
+    headers={"Authorization": "Bearer YOUR_KEY"},
+    json={"message": "Hello!", "model": "gpt-6-luna-max"},
+    timeout=120,
+)
+print(r.json()["reply"])</pre>
+
+          <h3>9) Honest limits (from the wrapper research)</h3>
+          <ul>
+            <li>Arena can change its site and break every wrapper — it has happened several times. When it breaks, this server returns a clear error code instead of hanging.</li>
+            <li>Your Arena account's own limits apply (daily credits for Direct mode). Don't hammer it — rapid-fire requests earn ~20-minute cooldowns.</li>
+            <li>Keep the server browser and the login on the same machine/IP — the reCAPTCHA tokens are bound to both.</li>
+            <li>There is no tool-calling (function calling) through Arena — plain chat in, text out (images Arena creates are returned in <code>images</code> when a model produces them).</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const $ = id => document.getElementById(id);
+document.querySelectorAll('.origin').forEach(el => el.textContent = location.origin);
+$('dashUrl').textContent = location.origin + '/dashboard';
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || ('HTTP ' + res.status));
+  return data;
+}
+
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+  document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+  t.classList.add('active');
+  $('tab-keys').classList.toggle('hidden', t.dataset.tab !== 'keys');
+  $('tab-howto').classList.toggle('hidden', t.dataset.tab !== 'howto');
+  if (t.dataset.tab === 'howto') loadModels();
+}));
+
+async function refreshStatus() {
+  const s = await api('/api/admin/status').catch(() => ({ logged_in: false }));
+  $('loginCard').classList.toggle('hidden', !!s.logged_in);
+  $('adminArea').classList.toggle('hidden', !s.logged_in);
+  if (s.logged_in) { loadMasterKey(); loadKeys(); loadArenaStatus(); }
+}
+async function loadArenaStatus() {
+  const pill = $('arenaPill');
+  const s = await api('/api/admin/arena-status').catch(() => null);
+  if (s && s.logged_in && !s.expired) { pill.textContent = 'logged in ✅'; pill.className = 'pill on'; }
+  else if (s && s.logged_in && s.expired) { pill.textContent = 'session expired — run npm run login'; pill.className = 'pill off'; }
+  else { pill.textContent = 'not logged in — run npm run login'; pill.className = 'pill off'; }
+}
+$('importSessionBtn').onclick = async () => {
+  const f = $('sessionFile').files[0];
+  const msg = $('importSessionMsg');
+  if (!f) { msg.textContent = 'Choose arena-profile.zip first.'; return; }
+  msg.textContent = 'Reading file…';
+  try {
+    const buf = await f.arrayBuffer();
+    let bin = ''; const bytes = new Uint8Array(buf);
+    for (let i = 0; i < bytes.length; i += 32768) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 32768));
+    msg.textContent = 'Uploading ' + (buf.byteLength / 1048576).toFixed(1) + ' MB…';
+    const d = await api('/api/admin/import-session', { method: 'POST', body: JSON.stringify({ zip_b64: btoa(bin) }) });
+    msg.textContent = '✅ ' + (d.message || 'Imported.');
+    loadArenaStatus();
+  } catch (e) { msg.textContent = '❌ ' + e.message; }
+};
+async function loadMasterKey() {
+  const box = $('masterKeyBox');
+  const d = await api('/api/admin/master-key').catch(e => ({ error: e.message }));
+  if (d.error) { box.innerHTML = '<p class="sub">Could not load: ' + d.error + '</p>'; return; }
+  if (!d.configured) { box.innerHTML = '<p class="sub">No fixed key is set on this server. Start it with <code>ARENA_API_KEY=arena-...</code> in the environment if you want one — or just use created keys below.</p>'; return; }
+  box.innerHTML = '<p class="sub">Masked: <code>••••••••' + d.last4 + '</code></p>' +
+    '<button class="ghost" id="showMaster">👁 Show</button> <button class="ghost" id="copyMaster">📋 Copy</button> <code id="masterFull" class="hidden" style="word-break:break-all;"></code>';
+  $('showMaster').onclick = () => { const el = $('masterFull'); el.textContent = d.api_key; el.classList.toggle('hidden'); };
+  $('copyMaster').onclick = () => navigator.clipboard.writeText(d.api_key);
+}
+$('loginBtn').addEventListener('click', async () => {
+  $('loginMsg').textContent = ''; $('loginMsg').className = 'msg';
+  try {
+    await api('/api/admin/login', { method: 'POST', body: JSON.stringify({ username: $('adminUser').value.trim(), password: $('adminPass').value }) });
+    $('adminName').textContent = $('adminUser').value.trim() || 'admin';
+    refreshStatus();
+  } catch (e) { $('loginMsg').textContent = e.message; $('loginMsg').className = 'msg err'; }
+});
+$('logoutBtn').addEventListener('click', async () => { await api('/api/admin/logout', { method: 'POST' }).catch(() => {}); refreshStatus(); });
+
+$('createKeyBtn').addEventListener('click', async () => {
+  $('keyMsg').textContent = ''; $('newKeyBox').style.display = 'none';
+  try {
+    const d = await api('/api/keys', { method: 'POST', body: JSON.stringify({ label: $('keyLabel').value.trim() || 'Untitled key' }) });
+    $('newKeyText').textContent = d.api_key;
+    $('newKeyBox').style.display = 'block';
+    $('keyMsg').textContent = 'Key created ✅'; $('keyMsg').className = 'msg ok';
+    loadKeys();
+  } catch (e) { $('keyMsg').textContent = e.message; $('keyMsg').className = 'msg err'; }
+});
+$('copyNewKey').addEventListener('click', () => navigator.clipboard.writeText($('newKeyText').textContent));
+
+async function loadKeys() {
+  const box = $('keysTable');
+  const d = await api('/api/keys').catch(e => ({ error: e.message }));
+  if (d.error) { box.innerHTML = '<p class="sub">' + d.error + '</p>'; return; }
+  if (!d.keys.length) { box.innerHTML = '<p class="sub">No keys yet — create your first one above.</p>'; return; }
+  let html = '<table><tr><th>Label</th><th>Key</th><th>Created</th><th>Status</th><th></th></tr>';
+  for (const k of d.keys) {
+    html += '<tr><td>' + k.label.replace(/</g, '&lt;') + '</td><td><code>arena-••••' + k.last4 + '</code></td><td>' +
+      new Date(k.created_at).toLocaleString() + '</td><td>' + (k.revoked ? '<span class="pill off">revoked</span>' : '<span class="pill on">active</span>') + '</td>' +
+      '<td>' + (k.revoked ? '' : '<button class="danger" onclick="revokeKey(\'' + k.id + '\')">Revoke</button>') + '</td></tr>';
+  }
+  box.innerHTML = html + '</table>';
+}
+async function revokeKey(id) {
+  if (!confirm('Revoke this key? Apps using it will stop working.')) return;
+  await api('/api/keys/' + id, { method: 'DELETE' }).catch(e => alert(e.message));
+  loadKeys();
+}
+
+let modelsLoaded = false;
+let allModelsCache = [];
+function modelMatchesFilter(m, f) {
+  if (f === 'all') return true;
+  if (f === 'vision') return !!m.accepts_images;
+  if (f === 'image') return !!m.creates_images;
+  if (f === 'video') return !!m.creates_video;
+  return !m.creates_images && !m.creates_video;
+}
+function renderModelsTable(filter) {
+  const box = $('modelsTable');
+  const list = allModelsCache.filter(m => modelMatchesFilter(m, filter || 'all'));
+  $('modelsCount').textContent = list.length + ' of ' + allModelsCache.length + ' models';
+  if (!list.length) { box.innerHTML = '<p class="sub">No models match this filter.</p>'; return; }
+  let html = '<table><tr><th>Model name (use in "model")</th><th>By</th><th>Can do</th></tr>';
+  for (const m of list) {
+    const caps = [];
+    if (m.accepts_images) caps.push('👁 sees images');
+    if (m.creates_images) caps.push('🎨 creates images');
+    if (m.creates_video) caps.push('🎬 creates video');
+    if (!caps.length) caps.push('💬 text');
+    html += '<tr><td><code>' + String(m.name).replace(/</g, '&lt;') + '</code></td><td>' + (m.organization || '') + '</td><td>' + caps.join(' · ') + '</td></tr>';
+  }
+  box.innerHTML = html + '</table>';
+}
+document.querySelectorAll('[data-mfilter]').forEach(b => b.addEventListener('click', () => renderModelsTable(b.dataset.mfilter)));
+async function loadModels() {
+  if (modelsLoaded) return; modelsLoaded = true;
+  const box = $('modelsTable');
+  const d = await api('/api/models').catch(e => ({ error: e.message }));
+  if (d.error) { box.innerHTML = '<p class="sub">Models unavailable right now: ' + d.error + '</p>'; modelsLoaded = false; return; }
+  allModelsCache = d.models || [];
+  renderModelsTable('all');
+}
+
+refreshStatus();
+</script>
+</body>
+</html>

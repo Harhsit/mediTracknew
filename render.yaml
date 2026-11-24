@@ -1,0 +1,31 @@
+# Render blueprint for the Arena wrapper site.
+# IMPORTANT: the free plan cannot run this — Chromium needs ~2 GB RAM and the
+# Arena login session must survive restarts, so this uses a paid plan with a
+# persistent disk mounted at /data.
+services:
+  - type: web
+    name: arena-wrapper
+    env: docker
+    plan: standard        # 2 GB RAM — the smallest plan Chromium survives on
+    healthCheckPath: /
+    disk:
+      name: arena-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: DATA_DIR
+        value: /data
+      - key: ARENA_PROFILE_DIR
+        value: /data/arena-profile
+      - key: ADMIN_USERNAME
+        value: admin
+      - key: ADMIN_PASSWORD
+        sync: false        # set your own in the Render dashboard
+      - key: ARENA_API_KEY
+        sync: false        # your fixed key, e.g. arena-... (generate one you like)
+      - key: ARENA_PROXY
+        sync: false        # STRONGLY recommended: a residential proxy (e.g. Webshare
+                           # rotating) — Arena distrusts datacenter IPs. Format:
+                           # http://user:pass@host:port
+      - key: ALLOW_KEYLESS_CHAT
+        value: "false"

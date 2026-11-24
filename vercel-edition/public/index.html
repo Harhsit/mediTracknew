@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Arena AI Wrapper — Vercel Edition</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; font-family:'Segoe UI', system-ui, sans-serif; }
+  body { min-height:100vh; background:linear-gradient(135deg,#0f2027,#203a43,#2c5364); color:#fff; padding:18px 14px 40px; }
+  .wrap { max-width:880px; margin:0 auto; }
+  nav.glass { display:flex; align-items:center; gap:10px; padding:12px 18px; border-radius:18px;
+    background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.25);
+    backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); box-shadow:0 8px 32px rgba(0,0,0,.25); }
+  nav .logo { font-size:20px; font-weight:700; letter-spacing:.3px; }
+  nav .spacer { flex:1; }
+  nav a { color:#fff; text-decoration:none; font-size:14px; padding:8px 14px; border-radius:12px; background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.2); }
+  nav a:hover { background:rgba(255,255,255,.22); }
+  .hero { text-align:center; margin:34px 0 8px; }
+  .hero h1 { font-size:32px; margin-bottom:8px; }
+  .hero p { opacity:.85; font-size:15px; }
+  .card { margin-top:22px; padding:22px; border-radius:20px; background:rgba(255,255,255,.08);
+    border:1px solid rgba(255,255,255,.22); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); }
+  label { display:block; font-size:13px; opacity:.85; margin:14px 0 6px; }
+  label:first-child { margin-top:0; }
+  input, select, textarea { width:100%; padding:12px 14px; border-radius:12px; border:1px solid rgba(255,255,255,.3);
+    background:rgba(255,255,255,.12); color:#fff; font-size:15px; outline:none; }
+  select option { color:#111; }
+  textarea { min-height:110px; resize:vertical; }
+  button { margin-top:16px; width:100%; padding:13px; border:none; border-radius:12px; cursor:pointer;
+    background:linear-gradient(135deg,#00c6ff,#0072ff); color:#fff; font-size:16px; font-weight:600; }
+  button:disabled { opacity:.55; cursor:wait; }
+  .reply { margin-top:18px; padding:16px; border-radius:14px; background:rgba(0,0,0,.28); border:1px solid rgba(255,255,255,.15);
+    white-space:pre-wrap; word-break:break-word; font-size:15px; line-height:1.55; display:none; }
+  .meta { margin-top:10px; font-size:12.5px; opacity:.75; display:none; }
+  .hint { font-size:12.5px; opacity:.7; margin-top:8px; line-height:1.5; }
+  /* ---- seamless model picker ---- */
+  .picker { position:relative; }
+  .picker-btn { margin-top:0; display:flex; align-items:center; gap:10px; text-align:left; padding:12px 14px;
+    background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.3); border-radius:12px; font-size:15px; font-weight:500; }
+  .picker-btn:hover { background:rgba(255,255,255,.18); }
+  .picker-btn .grow { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .picker-btn .badge { font-size:11px; padding:3px 8px; border-radius:999px; background:rgba(0,198,255,.25); border:1px solid rgba(0,198,255,.5); }
+  .picker-btn .chev { opacity:.7; }
+  .picker-panel { position:absolute; left:0; right:0; top:calc(100% + 6px); z-index:30; border-radius:14px; overflow:hidden;
+    background:#122028; border:1px solid rgba(255,255,255,.25); box-shadow:0 18px 50px rgba(0,0,0,.5); display:none; }
+  .picker-panel.open { display:block; }
+  .picker-panel input { border:none; border-bottom:1px solid rgba(255,255,255,.18); border-radius:0; background:rgba(255,255,255,.06); }
+  .picker-list { max-height:320px; overflow-y:auto; padding:6px; }
+  .picker-group { font-size:11px; letter-spacing:.08em; text-transform:uppercase; opacity:.65; padding:10px 10px 4px; }
+  .picker-item { display:flex; align-items:center; gap:8px; padding:9px 10px; border-radius:10px; cursor:pointer; font-size:14.5px; }
+  .picker-item:hover { background:rgba(255,255,255,.10); }
+  .picker-item.selected { background:rgba(0,114,255,.35); }
+  .picker-item .org { margin-left:auto; font-size:12px; opacity:.6; }
+  .picker-item .tag { font-size:11px; padding:2px 7px; border-radius:999px; background:rgba(255,255,255,.14); }
+  .picker-empty { padding:14px 10px; font-size:14px; opacity:.7; }
+  #pickNote { font-size:12.5px; color:#ffd97a; margin-top:6px; min-height:16px; }
+  #modeHint { font-size:12.5px; opacity:.75; margin-top:2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav class="glass">
+    <div class="logo">🏟️ Arena AI Wrapper</div>
+    <div class="spacer"></div>
+    <span style="font-size:14px; padding:8px 14px; border-radius:12px; background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.2);">☁️ Vercel edition</span>
+  </nav>
+
+  <div class="hero">
+    <h1>Chat with Arena's models</h1>
+    <p>This Vercel deployment talks to arena.ai with your logged-in account and answers like an API. The first message after a while can take 10–30 seconds (the browser starts fresh each time).</p>
+  </div>
+
+  <div class="card">
+    <label for="key">Your fixed API key (the ARENA_API_KEY set on Vercel)</label>
+    <input id="key" type="password" placeholder="arena-...">
+    <label>Pick an AI — everything else follows from your pick</label>
+    <div class="picker">
+      <button type="button" class="picker-btn" id="pickerBtn">
+        <span id="pickIcon">🤖</span>
+        <span class="grow" id="pickName">Loading models…</span>
+        <span class="badge" id="pickBadge" style="display:none;"></span>
+        <span class="chev">▾</span>
+      </button>
+      <div class="picker-panel" id="pickerPanel">
+        <input id="pickerSearch" type="text" placeholder="🔍 Search models…">
+        <div class="picker-list" id="pickerList"></div>
+      </div>
+    </div>
+    <div id="pickNote"></div>
+    <div id="modeHint"></div>
+    <label for="msg">Message</label>
+    <textarea id="msg" placeholder="Ask anything…">Hello! Who are you?</textarea>
+    <label for="imgFile">Attach an image (optional — the picker switches to a vision model for you)</label>
+    <input id="imgFile" type="file" accept="image/*">
+    <img id="imgPreview" alt="" style="display:none; max-width:220px; border-radius:12px; margin-top:10px;">
+    <button id="send">Send</button>
+    <div class="reply" id="reply"></div>
+    <div class="meta" id="meta"></div>
+    <p class="hint">If chats fail with LOGIN_REQUIRED, the Arena session has expired: re-run <b>npm run session-for-vercel</b> in the main project and update the ARENA_SESSION_B64 env var, then redeploy.</p>
+  </div>
+</div>
+<script>
+  const NO_VIDEO = true; // the Vercel edition sets this to true (video cannot run there)
+  const $ = id => document.getElementById(id);
+  const saved = localStorage.getItem('arena_api_key');
+  if (saved) $('key').value = saved;
+
+  // ------------------------------------------------------------ picker
+  // One pick decides everything: the group a model sits in IS its job.
+  //   🎨 image creators -> sending creates an image (no checkbox)
+  //   🎬 video          -> ONE entry: a random video model, server-picked
+  //   👁 vision         -> chat models that can also read attached images
+  //   💬 text           -> plain chat
+  let allModels = [];
+  let selection = null; // {kind:'model', name} | {kind:'random-video'}
+
+  function groupOf(m) {
+    if (m.creates_video) return 'video';
+    if (m.creates_images) return 'image';
+    if (m.accepts_images) return 'vision';
+    return 'text';
+  }
+  const GROUPS = [
+    { id: 'text',   title: '💬 Text chat',      icon: '💬' },
+    { id: 'vision', title: '👁 Vision — reads images', icon: '👁' },
+    { id: 'image',  title: '🎨 Create an image', icon: '🎨' },
+    { id: 'video',  title: '🎬 Create a video',  icon: '🎲' },
+  ];
+  function findModel(name) { return allModels.find(m => m.name === name); }
+  function selectionModel() { return selection && selection.kind === 'model' ? findModel(selection.name) : null; }
+
+  function renderPickerList() {
+    const q = $('pickerSearch').value.trim().toLowerCase();
+    const list = $('pickerList');
+    list.innerHTML = '';
+    let any = false;
+    for (const g of GROUPS) {
+      if (g.id === 'video' && NO_VIDEO) continue;
+      const items = [];
+      if (g.id === 'video') {
+        const n = allModels.filter(m => m.creates_video).length;
+        if (n && (!q || 'random video model'.includes(q))) {
+          items.push({ kind: 'random-video', name: 'Random video model', sub: 'server picks 1 of ' + n });
+        }
+      } else {
+        for (const m of allModels.filter(m => groupOf(m) === g.id)) {
+          if (q && !(m.name.toLowerCase().includes(q) || (m.organization || '').toLowerCase().includes(q))) continue;
+          items.push({ kind: 'model', name: m.name, sub: m.organization || '' });
+        }
+      }
+      if (!items.length) continue;
+      any = true;
+      const head = document.createElement('div');
+      head.className = 'picker-group'; head.textContent = g.title;
+      list.appendChild(head);
+      for (const it of items) {
+        const row = document.createElement('div');
+        row.className = 'picker-item' + (selection && selection.kind === it.kind && selection.name === it.name ? ' selected' : '');
+        const nm = document.createElement('span'); nm.textContent = (g.id === 'video' ? '🎲 ' : '') + it.name;
+        row.appendChild(nm);
+        if (it.sub) { const s = document.createElement('span'); s.className = 'org'; s.textContent = it.sub; row.appendChild(s); }
+        row.addEventListener('click', () => { setSelection(it, ''); closePanel(); });
+        list.appendChild(row);
+      }
+    }
+    if (!any) list.innerHTML = '<div class="picker-empty">No models match your search.</div>';
+  }
+
+  function renderPickerBtn() {
+    const note = $('pickNote');
+    if (!selection) {
+      $('pickIcon').textContent = '🤖'; $('pickName').textContent = allModels.length ? 'Choose a model…' : 'Models unavailable — is the Arena login done?';
+      $('pickBadge').style.display = 'none'; $('modeHint').textContent = '';
+      return;
+    }
+    if (selection.kind === 'random-video') {
+      $('pickIcon').textContent = '🎲';
+      $('pickName').textContent = 'Random video model';
+      const b = $('pickBadge'); b.style.display = ''; b.textContent = 'creates video';
+      $('modeHint').textContent = '🎬 Your message becomes a video — the server picks the model at random.';
+      return;
+    }
+    const m = selectionModel();
+    if (!m) { selection = null; renderPickerBtn(); return; }
+    const g = GROUPS.find(x => x.id === groupOf(m));
+    $('pickIcon').textContent = g.icon;
+    $('pickName').textContent = m.name;
+    const b = $('pickBadge'); b.style.display = '';
+    b.textContent = g.id === 'image' ? 'creates images' : g.id === 'vision' ? 'reads images' : 'text chat';
+    $('modeHint').textContent = g.id === 'image' ? '🎨 Your message becomes an image.'
+      : g.id === 'vision' ? '👁 Chats as text — and can read an image you attach.'
+      : '';
+    if (!note.dataset.sticky) note.textContent = '';
+  }
+
+  function setSelection(sel, noteText) {
+    selection = sel;
+    try { localStorage.setItem('arena_selection', JSON.stringify(sel)); } catch (e) {}
+    const note = $('pickNote');
+    if (noteText) { note.textContent = noteText; note.dataset.sticky = '1'; setTimeout(() => { delete note.dataset.sticky; note.textContent = ''; }, 6000); }
+    renderPickerBtn(); renderPickerList();
+  }
+
+  function openPanel() { $('pickerSearch').value = ''; $('pickerPanel').classList.add('open'); renderPickerList(); setTimeout(() => $('pickerSearch').focus(), 30); }
+  function closePanel() { $('pickerPanel').classList.remove('open'); }
+  $('pickerBtn').addEventListener('click', (e) => { e.stopPropagation(); $('pickerPanel').classList.contains('open') ? closePanel() : openPanel(); });
+  $('pickerPanel').addEventListener('click', (e) => e.stopPropagation());
+  document.addEventListener('click', closePanel);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePanel(); });
+  $('pickerSearch').addEventListener('input', renderPickerList);
+
+  fetch('/api/models').then(r => r.json()).then(d => {
+    if (d.status === 'success' && d.models.length) allModels = d.models;
+    // Restore the last pick, else default to the first text model.
+    let restored = null;
+    try { restored = JSON.parse(localStorage.getItem('arena_selection') || 'null'); } catch (e) {}
+    if (restored && restored.kind === 'random-video' && !NO_VIDEO && allModels.some(m => m.creates_video)) selection = restored;
+    else if (restored && restored.kind === 'model' && findModel(restored.name)) selection = restored;
+    else {
+      const first = allModels.find(m => groupOf(m) === 'text') || allModels[0];
+      selection = first ? { kind: 'model', name: first.name } : null;
+    }
+    renderPickerBtn(); renderPickerList();
+  }).catch(() => { $('pickName').textContent = 'Could not load models'; });
+
+  // ------------------------------------------------------------ image attach
+  let attachedImage = null;
+  $('imgFile').addEventListener('change', () => {
+    const f = $('imgFile').files[0];
+    if (!f) { attachedImage = null; $('imgPreview').style.display = 'none'; return; }
+    const reader = new FileReader();
+    reader.onload = () => {
+      attachedImage = reader.result;
+      $('imgPreview').src = attachedImage;
+      $('imgPreview').style.display = 'block';
+      // Seamless part: if the current pick cannot read images — or it is a
+      // media-creation model, where an attachment would be ambiguous —
+      // switch to a vision chat model automatically instead of failing
+      // or guessing at send time.
+      const m = selectionModel();
+      if (!selection || selection.kind === 'random-video' || !m || !m.accepts_images || m.creates_images || m.creates_video) {
+        const v = allModels.find(x => x.accepts_images && !x.creates_images && !x.creates_video) || allModels.find(x => x.accepts_images);
+        if (v) setSelection({ kind: 'model', name: v.name }, '📎 Switched to ' + v.name + ' — it can read your image.');
+      }
+    };
+    reader.readAsDataURL(f);
+  });
+
+  // ------------------------------------------------------------ send
+  $('send').addEventListener('click', async () => {
+    const key = $('key').value.trim();
+    if (key) localStorage.setItem('arena_api_key', key);
+    const btn = $('send'); btn.disabled = true; btn.textContent = 'Thinking… (Arena can take a while)';
+    $('reply').style.display = 'none'; $('reply').innerHTML = ''; $('meta').style.display = 'none';
+    try {
+      const m = selectionModel();
+      const r = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(key ? { 'Authorization': 'Bearer ' + key } : {}) },
+        body: JSON.stringify({
+          message: $('msg').value,
+          ...(selection && selection.kind === 'random-video' ? { generateVideo: true }
+            : m ? { model: m.name, ...(m.creates_images ? { generateImage: true } : {}) }
+            : {}),
+          ...(attachedImage ? { image: attachedImage } : {})
+        })
+      });
+      const d = await r.json();
+      $('reply').style.display = 'block';
+      if (d.status === 'success') {
+        const text = document.createElement('div');
+        text.textContent = d.reply || '';
+        $('reply').appendChild(text);
+        (d.images || []).forEach(im => {
+          const img = document.createElement('img');
+          img.src = im.data_url || im.url;
+          img.alt = 'Generated image';
+          img.style.cssText = 'max-width:100%; border-radius:12px; margin-top:10px;';
+          $('reply').appendChild(img);
+        });
+        (d.videos || []).forEach(v => {
+          const vid = document.createElement('video');
+          vid.src = v.data_url || v.url;
+          vid.controls = true;
+          vid.style.cssText = 'max-width:100%; border-radius:12px; margin-top:10px;';
+          $('reply').appendChild(vid);
+        });
+        $('meta').style.display = 'block';
+        $('meta').textContent = 'Model used: ' + d.model_used + ' · Conversation: ' + d.conversation_id;
+      } else {
+        $('reply').textContent = '⚠️ ' + (d.message || 'Request failed');
+      }
+    } catch (e) {
+      $('reply').style.display = 'block';
+      $('reply').textContent = '⚠️ Network error: ' + e.message;
+    }
+    btn.disabled = false; btn.textContent = 'Send';
+  });
+</script>
+</body>
+</html>

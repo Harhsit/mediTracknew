@@ -1,0 +1,10 @@
+{
+  "name": "arena-wrapper-vercel",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Arena.ai wrapper — Vercel edition: stateless serverless chat with a fixed API key.",
+  "dependencies": {
+    "@sparticuz/chromium": "^131.0.0",
+    "playwright-core": "^1.49.0"
+  }
+}

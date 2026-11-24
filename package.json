@@ -1,0 +1,23 @@
+{
+  "name": "arena-ai-wrapper",
+  "version": "1.0.0",
+  "description": "Local API-key server wrapping arena.ai (LMArena) chat behind POST /api/chat with your own API keys",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "login": "node login.js",
+    "export-session": "node zip-session.js",
+    "session-for-vercel": "node session-for-vercel.js",
+    "setup": "npx playwright install chromium"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "adm-zip": "^0.5.18",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "playwright": "^1.49.0"
+  },
+  "license": "MIT"
+}
