@@ -73,7 +73,7 @@
       <div id="tab-keys">
         <div class="card glass">
           <h2>☁️ Arena session (for deployed servers)</h2>
-          <p class="sub">Running this site on a server (Render, Railway, a VPS)? The server needs your Arena login. On your own computer run <code>npm run login</code> once, then <code>npm run export-session</code> — that makes <code>arena-profile.zip</code>. Upload it here and this server chats as your logged-in account. Your Arena password never leaves your computer — only the browser session travels. If chats later fail with LOGIN_REQUIRED, export and import a fresh zip.</p>
+          <p class="sub">Running this site on a server (Render, Railway, a VPS)? The server needs your Arena login. <b>Easiest:</b> set the <code>ARENA_EMAIL</code> and <code>ARENA_PASSWORD</code> environment variables on the server — it then logs itself in to Arena in the background, no files needed. <b>Alternative</b> (accounts with no password): on your own computer run <code>npm run login</code> once, then <code>npm run export-session</code> — that makes <code>arena-profile.zip</code>. Upload it here and this server chats as your logged-in account. If chats later fail with LOGIN_REQUIRED, export and import a fresh zip.</p>
           <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
             <input type="file" id="sessionFile" accept=".zip" />
             <button id="importSessionBtn">⬆ Import Arena session</button>

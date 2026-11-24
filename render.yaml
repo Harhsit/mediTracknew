@@ -23,6 +23,10 @@ services:
         sync: false        # set your own in the Render dashboard
       - key: ARENA_API_KEY
         sync: false        # your fixed key, e.g. arena-... (generate one you like)
+      - key: ARENA_EMAIL
+        sync: false        # your Arena login email — with ARENA_PASSWORD the
+      - key: ARENA_PASSWORD
+        sync: false        # server logs itself in; no session zip needed
       - key: ARENA_PROXY
         sync: false        # STRONGLY recommended: a residential proxy (e.g. Webshare
                            # rotating) — Arena distrusts datacenter IPs. Format:

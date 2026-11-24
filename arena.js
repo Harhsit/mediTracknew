@@ -147,11 +147,76 @@ async function getAuthSession(p) {
     } catch (e) { return { _unparsed: true }; }
 }
 
+// ------------------------------------------------------------ auto-login
+// If ARENA_EMAIL + ARENA_PASSWORD are set, the engine can log ITSELF in
+// through Arena's own dialog — no manual `npm run login`, no session zip:
+//   home (logged out) → "Log in" → "Your email" → "Continue with email"
+//   → password field (existing accounts) → "Log In".
+// The password comes only from the environment and is never logged.
+// Attempts are throttled: at most one try per minute after a failure.
+let lastAutoLoginTry = 0;
+let autoLoginError = null;
+function autoLoginCreds() {
+    const email = String(process.env.ARENA_EMAIL || '').trim();
+    const password = String(process.env.ARENA_PASSWORD || '');
+    return email && password ? { email, password } : null;
+}
+async function autoLogin(p) {
+    const creds = autoLoginCreds();
+    if (!creds) return false;
+    if (Date.now() - lastAutoLoginTry < 60 * 1000 && autoLoginError) return false;
+    lastAutoLoginTry = Date.now();
+    autoLoginError = null;
+    try {
+        await gotoArena(p);
+        const loginBtn = p.getByRole('button', { name: /^log in$/i }).first();
+        await loginBtn.waitFor({ state: 'visible', timeout: 15000 });
+        await loginBtn.click();
+        const dialog = p.locator('div[role="dialog"]').last();
+        const emailInput = dialog.locator('input[type="email"], input[name="email"]').first();
+        await emailInput.waitFor({ state: 'visible', timeout: 15000 });
+        await emailInput.fill(creds.email);
+        await dialog.getByRole('button', { name: /continue with email/i }).click();
+        const passInput = dialog.locator('input[type="password"]').first();
+        try {
+            await passInput.waitFor({ state: 'visible', timeout: 20000 });
+        } catch (e) {
+            const text = await dialog.innerText().catch(() => '');
+            if (/verify your email|verification link|create account/i.test(text)) {
+                throw new ArenaError('AUTO_LOGIN_FAILED', 'Arena answered the email step with a create-account / verify-by-email-link screen, not a password field. Auto-login only works for an existing account that has a password. Log in once with `npm run login` (or the session import) for this account.');
+            }
+            throw new ArenaError('AUTO_LOGIN_FAILED', 'The password field never appeared after the email step. Arena may have changed its login dialog.');
+        }
+        await passInput.fill(creds.password);
+        await dialog.getByRole('button', { name: /^log in$/i }).click();
+        // Success = the Supabase auth cookie shows up (checked by caller too).
+        for (let i = 0; i < 30; i++) {
+            if (await getAuthSession(p)) return true;
+            const text = await dialog.innerText().catch(() => '');
+            if (/invalid|incorrect|wrong password|try again/i.test(text)) {
+                throw new ArenaError('AUTO_LOGIN_FAILED', 'Arena rejected the email/password (ARENA_EMAIL / ARENA_PASSWORD). Check the env vars.');
+            }
+            await p.waitForTimeout(1000);
+        }
+        throw new ArenaError('AUTO_LOGIN_FAILED', 'Login was submitted but no session appeared (a captcha or an extra verification step may be blocking it).');
+    } catch (err) {
+        autoLoginError = err instanceof ArenaError ? err : new ArenaError('AUTO_LOGIN_FAILED', 'Auto-login failed: ' + err.message.split('\n')[0]);
+        return false;
+    }
+}
+// Return a live session, auto-logging-in first when credentials are set.
+async function ensureSession(p) {
+    let session = await getAuthSession(p);
+    if (session) return session;
+    if (await autoLogin(p)) session = await getAuthSession(p);
+    return session;
+}
+
 async function loginStatus() {
     const p = await getPage();
     await gotoArena(p);
-    const session = await getAuthSession(p);
-    if (!session) return { logged_in: false };
+    const session = await ensureSession(p);
+    if (!session) return { logged_in: false, auto_login_error: autoLoginError ? autoLoginError.message : undefined };
     const expiresAt = session.expires_at ? session.expires_at * 1000 : null;
     return { logged_in: true, expires_at: expiresAt, expired: expiresAt ? Date.now() > expiresAt : false };
 }
@@ -377,8 +442,11 @@ function enqueue(fn) { const run = queue.then(fn, fn); queue = run.catch(() => {
 async function chatOnce({ message, model, conversationId, images, generateImage, generateVideo }) {
     const p = await getPage();
     await gotoArena(p);
-    const session = await getAuthSession(p);
-    if (!session) throw new ArenaError('LOGIN_REQUIRED', 'No Arena login in the server browser profile. Run `npm run login` on this machine and log in to arena.ai once.');
+    const session = await ensureSession(p);
+    if (!session) {
+        if (autoLoginError) throw autoLoginError;
+        throw new ArenaError('LOGIN_REQUIRED', 'No Arena login in the server browser profile. Either set ARENA_EMAIL + ARENA_PASSWORD so the server logs itself in, or run `npm run login` on this machine and log in to arena.ai once.');
+    }
     const { sitekey } = await scrapeSiteData(p);
     let modelObj = await resolveModel(p, model);
     // Video creation has NO model selection: for a new video request a
@@ -465,4 +533,4 @@ function chat(args) {
     });
 }
 
-module.exports = { chat, listModels, loginStatus, resetEngine, ArenaError, PROFILE_DIR, _test: { scrapeSiteData, parseStream, modalityFor, modelCaps, VIDEO_ARENAS, IMAGE_ARENAS } };
+module.exports = { chat, listModels, loginStatus, resetEngine, ArenaError, PROFILE_DIR, _test: { scrapeSiteData, parseStream, modalityFor, modelCaps, VIDEO_ARENAS, IMAGE_ARENAS, autoLogin, ensureSession, autoLoginCreds } };

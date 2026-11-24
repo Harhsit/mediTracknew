@@ -35,6 +35,7 @@ Environment variables:
 | `PORT` | Port (default 3100) |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | Dashboard admin login (password required for key admin) |
 | `ARENA_API_KEY` | One fixed API key that always works |
+| `ARENA_EMAIL` / `ARENA_PASSWORD` | Your Arena login — when both are set, the server logs ITSELF in through Arena's dialog whenever there's no live session (no `npm run login`, no session zip). Works for existing accounts that have a password |
 | `ALLOW_KEYLESS_CHAT` | `true` = key optional when no key is sent (a wrong key still gets 401) |
 | `ARENA_HEADED` | `1` = show the engine browser window |
 | `ARENA_PROXY` | Proxy for the engine browser, e.g. `http://user:pass@host:port` (also honours `HTTPS_PROXY`) |
@@ -124,14 +125,15 @@ Steps (Render):
 
 1. Push this repo to GitHub → Render → New → Blueprint (it reads `render.yaml`)
    — or New Web Service → Docker. Plan: **Standard (2 GB)** + the `/data` disk.
-2. Set env vars: `ADMIN_PASSWORD`, `ARENA_API_KEY` (your fixed key), and
-   `ARENA_PROXY` (your residential proxy).
-3. On **your own computer**: `npm run login` (log in to arena.ai once), then
-   `npm run export-session` → `arena-profile.zip`.
-4. Open the deployed dashboard → log in as admin → **Import Arena session** →
-   upload the zip. Done — the site now chats as your account, from anywhere,
-   with the fixed key or created keys. If chats later return `LOGIN_REQUIRED`,
-   repeat steps 3–4 with a fresh export.
+2. Set env vars: `ADMIN_PASSWORD`, `ARENA_API_KEY` (your fixed key),
+   `ARENA_PROXY` (your residential proxy), and — easiest login —
+   `ARENA_EMAIL` + `ARENA_PASSWORD`: the server then logs itself in to
+   Arena in the background, no session files at all.
+3. Only if your Arena account has **no password** (Google-only sign-in):
+   on **your own computer** run `npm run login` (log in once), then
+   `npm run export-session` → `arena-profile.zip`, open the deployed
+   dashboard → log in as admin → **Import Arena session** → upload the zip.
+   If chats later return `LOGIN_REQUIRED`, repeat with a fresh export.
 
 ## Honest limits
 
